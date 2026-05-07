@@ -1,10 +1,10 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useClassroomStore } from '../store/classroomStore';
-import RoomEditor from '../components/canvas/RoomEditor';
+import DeskLayoutEditor from '../components/canvas/DeskLayoutEditor';
 import ClassroomNav from '../components/canvas/ClassroomNav';
 
-export default function ClassroomSetup() {
+export default function DeskLayoutPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const classroom = useClassroomStore((s) => (id ? s.classrooms[id] : undefined));
@@ -35,7 +35,7 @@ export default function ClassroomSetup() {
   return (
     <div>
       <ClassroomNav classroomId={classroom.id} classroomName={classroom.name} />
-      <RoomEditor classroomId={classroom.id} />
+      <DeskLayoutEditor classroomId={classroom.id} />
     </div>
   );
 }

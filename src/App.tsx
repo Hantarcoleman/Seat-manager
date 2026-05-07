@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
+import DeskLayoutPage from './pages/DeskLayoutPage';
 import './App.css';
 
 function App() {
@@ -27,6 +28,7 @@ function App() {
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/classroom/:id/setup" element={<ClassroomSetup />} />
+            <Route path="/classroom/:id/desks" element={<DeskLayoutPage />} />
           </Routes>
         </main>
       </div>
