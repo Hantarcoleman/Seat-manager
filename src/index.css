@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Light theme tokens */
+  --bg:   #f5f5f4;
+  --bg2:  #ffffff;
+  --sf:   #ffffff;
+  --ink:  #1c1917;
+  --ink2: #57534e;
+  --ink3: #a8a29e;
+  --ac:   #ea580c;
+  --abg:  #fff7ed;
+  --abd:  #fed7aa;
+  --gn:   #16a34a;
+  --rd:   #dc2626;
+  --bl:   #2563eb;
+  --pu:   #7c3aed;
+  --bd:   #e7e5e4;
+  --bd2:  #d6d3d1;
+  --r:    12px;
+  --rs:   8px;
+  --rx:   30px;
+  --sh:   0 1px 2px rgba(0,0,0,.04), 0 4px 12px rgba(0,0,0,.04);
+  --shl:  0 4px 14px rgba(0,0,0,.08);
+}
+
+[data-theme="dark"] {
+  --bg:   #0c0a09;
+  --bg2:  #1c1917;
+  --sf:   #292524;
+  --ink:  #fafaf9;
+  --ink2: #d6d3d1;
+  --ink3: #78716c;
+  --bd:   #292524;
+  --bd2:  #44403c;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Heebo', system-ui, -apple-system, sans-serif;
+  direction: rtl;
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font-family: inherit; }
+
+.privacy-note {
+  font-size: 12px;
+  color: var(--ink3);
+  background: var(--abg);
+  border: 1px solid var(--abd);
+  border-radius: var(--rs);
+  padding: 8px 12px;
+}
