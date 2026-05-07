@@ -2,12 +2,16 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { Classroom, Wall, FixedElement, Desk, Seat } from '../types';
 
-// יוצר id קצר ייחודי
 const uid = () => Math.random().toString(36).slice(2, 10);
+const HISTORY_CAP = 80;
 
 interface ClassroomState {
   classrooms: Record<string, Classroom>;
   currentId: string | null;
+
+  // היסטוריה ל-undo/redo (לא נשמרת ב-localStorage)
+  _history: Record<string, Classroom[]>;
+  _future: Record<string, Classroom[]>;
 
   // ── ניהול כיתות ──
   createClassroom: (name: string, width?: number, height?: number) => string;
@@ -30,38 +34,48 @@ interface ClassroomState {
   updateDesk: (id: string, patch: Partial<Desk>) => void;
   removeDesk: (id: string) => void;
   updateSeat: (id: string, patch: Partial<Seat>) => void;
+
+  // ── undo/redo ──
+  undo: () => void;
+  redo: () => void;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
 }
 
 const blankClassroom = (id: string, name: string, width: number, height: number): Classroom => ({
-  id,
-  name,
-  width,
-  height,
-  walls: [],
-  fixedElements: [],
-  desks: [],
-  seats: [],
+  id, name, width, height,
+  walls: [], fixedElements: [], desks: [], seats: [],
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 });
 
-// helper — מחזיר עותק חדש של הכיתה הנוכחית עם updatedAt מעודכן
-function mutateCurrent(
+// helper — מבצע מוטציה על הכיתה הנוכחית, רושם snapshot בהיסטוריה,
+// מנקה את ה-future stack (כי פעולה חדשה אחרי undo מוחקת את ה-redo)
+function mutateAndRecord(
   state: ClassroomState,
   fn: (c: Classroom) => Classroom
 ): Partial<ClassroomState> {
   if (!state.currentId) return {};
-  const c = state.classrooms[state.currentId];
+  const id = state.currentId;
+  const c = state.classrooms[id];
   if (!c) return {};
+  const past = state._history[id] ?? [];
+  const newPast = [...past, c].slice(-HISTORY_CAP);
   const updated = { ...fn(c), updatedAt: new Date().toISOString() };
-  return { classrooms: { ...state.classrooms, [c.id]: updated } };
+  return {
+    classrooms: { ...state.classrooms, [id]: updated },
+    _history: { ...state._history, [id]: newPast },
+    _future: { ...state._future, [id]: [] },
+  };
 }
 
 export const useClassroomStore = create<ClassroomState>()(
   persist(
-    (set, _get) => ({
+    (set, get) => ({
       classrooms: {},
       currentId: null,
+      _history: {},
+      _future: {},
 
       createClassroom: (name, width = 1200, height = 800) => {
         const id = uid();
@@ -69,6 +83,8 @@ export const useClassroomStore = create<ClassroomState>()(
         set((s) => ({
           classrooms: { ...s.classrooms, [id]: c },
           currentId: id,
+          _history: { ...s._history, [id]: [] },
+          _future: { ...s._future, [id]: [] },
         }));
         return id;
       },
@@ -86,41 +102,40 @@ export const useClassroomStore = create<ClassroomState>()(
         set((s) => {
           const next = { ...s.classrooms };
           delete next[id];
-          return {
-            classrooms: next,
-            currentId: s.currentId === id ? null : s.currentId,
-          };
+          const nh = { ...s._history }; delete nh[id];
+          const nf = { ...s._future }; delete nf[id];
+          return { classrooms: next, _history: nh, _future: nf, currentId: s.currentId === id ? null : s.currentId };
         }),
 
       addWall: (wall) => {
         const id = uid();
-        set((s) => mutateCurrent(s, (c) => ({ ...c, walls: [...c.walls, { ...wall, id }] })));
+        set((s) => mutateAndRecord(s, (c) => ({ ...c, walls: [...c.walls, { ...wall, id }] })));
         return id;
       },
 
       updateWall: (id, patch) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           walls: c.walls.map((w) => (w.id === id ? { ...w, ...patch } : w)),
         }))),
 
       removeWall: (id) =>
-        set((s) => mutateCurrent(s, (c) => ({ ...c, walls: c.walls.filter((w) => w.id !== id) }))),
+        set((s) => mutateAndRecord(s, (c) => ({ ...c, walls: c.walls.filter((w) => w.id !== id) }))),
 
       addFixedElement: (el) => {
         const id = uid();
-        set((s) => mutateCurrent(s, (c) => ({ ...c, fixedElements: [...c.fixedElements, { ...el, id }] })));
+        set((s) => mutateAndRecord(s, (c) => ({ ...c, fixedElements: [...c.fixedElements, { ...el, id }] })));
         return id;
       },
 
       updateFixedElement: (id, patch) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           fixedElements: c.fixedElements.map((e) => (e.id === id ? { ...e, ...patch } : e)),
         }))),
 
       removeFixedElement: (id) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           fixedElements: c.fixedElements.filter((e) => e.id !== id),
         }))),
@@ -128,7 +143,7 @@ export const useClassroomStore = create<ClassroomState>()(
       addDesk: (desk, seatTemplates) => {
         const deskId = uid();
         const newSeats: Seat[] = seatTemplates.map((t) => ({ ...t, id: uid(), deskId }));
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           desks: [...c.desks, { ...desk, id: deskId }],
           seats: [...c.seats, ...newSeats],
@@ -137,24 +152,78 @@ export const useClassroomStore = create<ClassroomState>()(
       },
 
       updateDesk: (id, patch) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           desks: c.desks.map((d) => (d.id === id ? { ...d, ...patch } : d)),
         }))),
 
       removeDesk: (id) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           desks: c.desks.filter((d) => d.id !== id),
           seats: c.seats.filter((seat) => seat.deskId !== id),
         }))),
 
       updateSeat: (id, patch) =>
-        set((s) => mutateCurrent(s, (c) => ({
+        set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           seats: c.seats.map((seat) => (seat.id === id ? { ...seat, ...patch } : seat)),
         }))),
+
+      // ── undo/redo ──
+      undo: () =>
+        set((s) => {
+          if (!s.currentId) return {};
+          const id = s.currentId;
+          const past = s._history[id] ?? [];
+          if (past.length === 0) return {};
+          const previous = past[past.length - 1];
+          const newPast = past.slice(0, -1);
+          const current = s.classrooms[id];
+          const future = s._future[id] ?? [];
+          return {
+            classrooms: { ...s.classrooms, [id]: previous },
+            _history: { ...s._history, [id]: newPast },
+            _future: { ...s._future, [id]: current ? [...future, current] : future },
+          };
+        }),
+
+      redo: () =>
+        set((s) => {
+          if (!s.currentId) return {};
+          const id = s.currentId;
+          const future = s._future[id] ?? [];
+          if (future.length === 0) return {};
+          const next = future[future.length - 1];
+          const newFuture = future.slice(0, -1);
+          const current = s.classrooms[id];
+          const past = s._history[id] ?? [];
+          return {
+            classrooms: { ...s.classrooms, [id]: next },
+            _future: { ...s._future, [id]: newFuture },
+            _history: { ...s._history, [id]: current ? [...past, current] : past },
+          };
+        }),
+
+      canUndo: () => {
+        const s = get();
+        if (!s.currentId) return false;
+        return (s._history[s.currentId]?.length ?? 0) > 0;
+      },
+
+      canRedo: () => {
+        const s = get();
+        if (!s.currentId) return false;
+        return (s._future[s.currentId]?.length ?? 0) > 0;
+      },
     }),
-    { name: 'seating_classrooms_v1' }
+    {
+      name: 'seating_classrooms_v1',
+      // לא לשמור את ההיסטוריה ב-localStorage
+      partialize: (state) => ({
+        classrooms: state.classrooms,
+        currentId: state.currentId,
+      }) as Partial<ClassroomState>,
+    }
   )
 );

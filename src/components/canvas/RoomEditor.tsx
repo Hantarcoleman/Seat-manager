@@ -20,8 +20,14 @@ interface Props {
   classroomId: string;
 }
 
-// Snap לרשת 10px
 const snap = (v: number, gridOn: boolean) => (gridOn ? Math.round(v / 10) * 10 : v);
+
+// יישור לקו ישר אופקי/אנכי לפי הציר עם המרחק הקטן יותר מהנקודה הקודמת
+function snapToAxis(prev: Point, p: Point): Point {
+  const dx = Math.abs(p.x - prev.x);
+  const dy = Math.abs(p.y - prev.y);
+  return dx > dy ? { x: p.x, y: prev.y } : { x: prev.x, y: p.y };
+}
 
 export default function RoomEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
@@ -31,56 +37,94 @@ export default function RoomEditor({ classroomId }: Props) {
   const addFixedElement = useClassroomStore((s) => s.addFixedElement);
   const removeFixedElement = useClassroomStore((s) => s.removeFixedElement);
   const updateFixedElement = useClassroomStore((s) => s.updateFixedElement);
+  const undo = useClassroomStore((s) => s.undo);
+  const redo = useClassroomStore((s) => s.redo);
+  // נקרא בכל render כדי לרענן enabled state של הכפתורים
+  const historyDepth = useClassroomStore((s) => (s.currentId ? s._history[s.currentId]?.length ?? 0 : 0));
+  const futureDepth  = useClassroomStore((s) => (s.currentId ? s._future[s.currentId]?.length ?? 0 : 0));
 
-  const [tool, setTool] = useState<ToolMode>('select');
+  const [tool, setTool] = useState<ToolMode>('blank');
   const [gridOn, setGridOn] = useState(true);
-  const [pendingPoint, setPendingPoint] = useState<Point | null>(null);
+  const [straightOn, setStraightOn] = useState(true);
+  // נקודות מצטברות של הקיר שנמצא כרגע בציור — null = אין קיר בציור
+  const [drafting, setDrafting] = useState<Point[] | null>(null);
+  const [draftingType, setDraftingType] = useState<WallType | null>(null);
   const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
   const [selected, setSelected] = useState<{ kind: 'wall' | 'fixed'; id: string } | null>(null);
 
   const stageRef = useRef<Konva.Stage>(null);
 
-  // מקש Delete מוחק את האלמנט הנבחר
+  const isWallTool = tool !== 'select' && tool in WALL_STYLES;
+  const isFixedTool = tool === 'teacher_desk_single' || tool === 'teacher_desk_gamma';
+
+  // סיום קיר מצטבר ושמירתו אם יש 2 נקודות לפחות
+  const finishDraft = () => {
+    if (drafting && draftingType && drafting.length >= 2) {
+      addWall({ type: draftingType, points: drafting });
+    }
+    setDrafting(null);
+    setDraftingType(null);
+  };
+
+  // מקלדת
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Ctrl+Z / Ctrl+Y
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+        e.preventDefault();
+        redo();
+        return;
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         if (selected) {
           if (selected.kind === 'wall') removeWall(selected.id);
           else removeFixedElement(selected.id);
           setSelected(null);
         }
-      } else if (e.key === 'Escape') {
-        setPendingPoint(null);
-        setSelected(null);
+      } else if (e.key === 'Escape' || e.key === 'Enter') {
+        if (drafting) finishDraft();
+        else setSelected(null);
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selected, removeWall, removeFixedElement]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, drafting, draftingType, undo, redo]);
+
+  // החלפת כלי בזמן ציור = סיום הקיר הנוכחי
+  const switchTool = (next: ToolMode) => {
+    if (drafting) finishDraft();
+    setTool(next);
+    setSelected(null);
+  };
 
   if (!classroom) return null;
 
-  const isWallTool = tool !== 'select' && tool in WALL_STYLES;
-  const isFixedTool = tool === 'teacher_desk_single' || tool === 'teacher_desk_gamma';
-
   // ── טיפול בלחיצה על הקנבס ─────────────────────────
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    // אם לחצו על אלמנט קיים — מטפלים בו דרך onClick של האלמנט עצמו
     if (e.target !== stageRef.current) return;
-
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const p = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
+    let p: Point = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
 
     if (isWallTool) {
-      if (!pendingPoint) {
-        setPendingPoint(p);
+      // יישור לציר אם המצב פעיל ויש נקודה קודמת
+      if (drafting && straightOn) {
+        const prev = drafting[drafting.length - 1];
+        p = snapToAxis(prev, p);
+      }
+      if (!drafting) {
+        setDrafting([p]);
+        setDraftingType(tool as WallType);
       } else {
-        // קיר נוצר עם שתי נקודות
-        addWall({ type: tool as WallType, points: [pendingPoint, p] });
-        setPendingPoint(null);
+        setDrafting([...drafting, p]);
       }
     } else if (isFixedTool) {
       const isGamma = tool === 'teacher_desk_gamma';
@@ -93,9 +137,12 @@ export default function RoomEditor({ classroomId }: Props) {
         gammaArmLength: isGamma ? 80 : undefined,
       });
     } else {
-      // select — ביטול בחירה
       setSelected(null);
     }
+  };
+
+  const onStageDblClick = () => {
+    if (drafting) finishDraft();
   };
 
   const onStageMouseMove = () => {
@@ -120,7 +167,6 @@ export default function RoomEditor({ classroomId }: Props) {
     return <>{lines}</>;
   };
 
-  // ── רינדור קיר ─────────────────────────────────────
   const renderWall = (w: Wall) => {
     const style = WALL_STYLES[w.type];
     const isSelected = selected?.kind === 'wall' && selected.id === w.id;
@@ -134,6 +180,7 @@ export default function RoomEditor({ classroomId }: Props) {
           strokeWidth={style.width + (isSelected ? 3 : 0)}
           dash={style.dash}
           lineCap="round"
+          lineJoin="round"
           onClick={() => setSelected({ kind: 'wall', id: w.id })}
           onTap={() => setSelected({ kind: 'wall', id: w.id })}
         />
@@ -159,7 +206,6 @@ export default function RoomEditor({ classroomId }: Props) {
     );
   };
 
-  // ── רינדור אלמנט קבוע (שולחן מורה) ─────────────────
   const renderFixedElement = (el: FixedElement) => {
     const isSelected = selected?.kind === 'fixed' && selected.id === el.id;
     const isGamma = el.type === 'teacher_desk_gamma';
@@ -215,12 +261,56 @@ export default function RoomEditor({ classroomId }: Props) {
     );
   };
 
+  // ── רינדור הקיר שבציור (preview) ──────────────────
+  const renderDraft = () => {
+    if (!drafting || !draftingType) return null;
+    const style = WALL_STYLES[draftingType];
+    // נקודה אחרונה -> מיקום העכבר (עם snap לציר אם פעיל)
+    const lastPoint = drafting[drafting.length - 1];
+    const cursor = straightOn ? snapToAxis(lastPoint, mousePos) : mousePos;
+    const flat: number[] = [];
+    drafting.forEach((p) => { flat.push(p.x, p.y); });
+    flat.push(cursor.x, cursor.y);
+    return (
+      <Group listening={false}>
+        {/* קווים שכבר נקבעו — מלאים */}
+        {drafting.length >= 2 && (() => {
+          const fixedFlat: number[] = [];
+          drafting.forEach((p) => { fixedFlat.push(p.x, p.y); });
+          return (
+            <Line
+              points={fixedFlat}
+              stroke={style.color}
+              strokeWidth={style.width}
+              dash={style.dash}
+              lineCap="round"
+              lineJoin="round"
+            />
+          );
+        })()}
+        {/* הקטע המתעדכן עם העכבר — שקוף */}
+        <Line
+          points={[lastPoint.x, lastPoint.y, cursor.x, cursor.y]}
+          stroke={style.color}
+          strokeWidth={style.width}
+          dash={style.dash ?? [4, 4]}
+          opacity={0.5}
+          lineCap="round"
+        />
+        {/* נקודות שכבר נקבעו */}
+        {drafting.map((p, i) => (
+          <Circle key={i} x={p.x} y={p.y} radius={4} fill="#ea580c" />
+        ))}
+      </Group>
+    );
+  };
+
   // ── ToolButton ─────────────────────────────────────
   const ToolButton = ({ id, label, emoji, color }: { id: ToolMode; label: string; emoji: string; color?: string }) => {
     const active = tool === id;
     return (
       <button
-        onClick={() => { setTool(id); setPendingPoint(null); setSelected(null); }}
+        onClick={() => switchTool(id)}
         style={{
           background: active ? (color ?? 'var(--ac)') : 'var(--bg2)',
           color: active ? '#fff' : 'var(--ink)',
@@ -244,15 +334,43 @@ export default function RoomEditor({ classroomId }: Props) {
     );
   };
 
+  const ActionButton = ({ onClick, disabled, emoji, label, danger }: {
+    onClick: () => void; disabled?: boolean; emoji: string; label: string; danger?: boolean;
+  }) => (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        background: 'var(--bg2)',
+        color: disabled ? 'var(--ink3)' : (danger ? 'var(--rd)' : 'var(--ink)'),
+        border: `1.5px solid ${disabled ? 'var(--bd)' : (danger ? '#fecaca' : 'var(--bd2)')}`,
+        borderRadius: 'var(--rs)',
+        padding: '8px 12px',
+        fontSize: 13,
+        fontWeight: 700,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        fontFamily: 'inherit',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+      }}
+      title={label}
+    >
+      <span style={{ fontSize: 16 }}>{emoji}</span>
+      <span>{label}</span>
+    </button>
+  );
+
   return (
     <div>
-      {/* Toolbar */}
+      {/* Toolbar — שורה 1: כלים */}
       <div style={{
         background: 'var(--bg2)',
         border: '1px solid var(--bd)',
         borderRadius: 'var(--r)',
         padding: 12,
-        marginBottom: 12,
+        marginBottom: 8,
         boxShadow: 'var(--sh)',
         display: 'flex',
         flexWrap: 'wrap',
@@ -270,8 +388,44 @@ export default function RoomEditor({ classroomId }: Props) {
         <div style={{ width: 1, height: 28, background: 'var(--bd2)' }} />
         <ToolButton id="teacher_desk_single" label="שולחן מורה" emoji="🪑" />
         <ToolButton id="teacher_desk_gamma"  label="שולחן מורה Γ" emoji="🪑" />
-        <div style={{ marginRight: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: 13, color: 'var(--ink2)', display: 'flex', alignItems: 'center', gap: 6 }}>
+      </div>
+
+      {/* Toolbar — שורה 2: פעולות + הגדרות */}
+      <div style={{
+        background: 'var(--bg2)',
+        border: '1px solid var(--bd)',
+        borderRadius: 'var(--r)',
+        padding: 10,
+        marginBottom: 12,
+        boxShadow: 'var(--sh)',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 8,
+        alignItems: 'center',
+      }}>
+        <ActionButton onClick={undo} disabled={historyDepth === 0} emoji="↶" label={`ביטול${historyDepth ? ` (${historyDepth})` : ''}`} />
+        <ActionButton onClick={redo} disabled={futureDepth === 0}  emoji="↷" label={`הבא${futureDepth ? ` (${futureDepth})` : ''}`} />
+        <ActionButton
+          onClick={() => {
+            if (!selected) return;
+            if (selected.kind === 'wall') removeWall(selected.id);
+            else removeFixedElement(selected.id);
+            setSelected(null);
+          }}
+          disabled={!selected}
+          emoji="🗑"
+          label="מחק נבחר"
+          danger
+        />
+        {drafting && (
+          <ActionButton onClick={finishDraft} emoji="✓" label="סיים קיר" />
+        )}
+        <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
+          <label style={{ fontSize: 13, color: 'var(--ink2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input type="checkbox" checked={straightOn} onChange={(e) => setStraightOn(e.target.checked)} />
+            קווים ישרים
+          </label>
+          <label style={{ fontSize: 13, color: 'var(--ink2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={gridOn} onChange={(e) => setGridOn(e.target.checked)} />
             רשת snap
           </label>
@@ -280,10 +434,10 @@ export default function RoomEditor({ classroomId }: Props) {
 
       {/* הוראות שימוש */}
       <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>
-        {tool === 'select' && 'לחץ על אלמנט לבחירה. Delete = מחיקה. גרור נקודות כתומות לעריכה.'}
-        {isWallTool && (pendingPoint
-          ? '✏ לחץ שוב כדי לסיים את הקיר.'
-          : '✏ לחץ נקודת התחלה לקיר.')}
+        {tool === 'select' && '💡 לחץ על אלמנט לבחירה. גרור נקודות כתומות לעריכה.'}
+        {isWallTool && (drafting
+          ? `✏ לחץ להוסיף נקודות לקיר. ${drafting.length} נקודות. סיום: Enter / Esc / לחיצה כפולה / החלפת כלי.`
+          : '✏ לחץ נקודה ראשונה כדי להתחיל קיר. לחיצות נוספות יוסיפו נקודות.')}
         {isFixedTool && '🪑 לחץ על מיקום הצבת השולחן.'}
       </div>
 
@@ -302,6 +456,7 @@ export default function RoomEditor({ classroomId }: Props) {
           height={classroom.height}
           onClick={onStageClick}
           onTap={onStageClick}
+          onDblClick={onStageDblClick}
           onMouseMove={onStageMouseMove}
           style={{ cursor: tool === 'select' ? 'default' : 'crosshair', background: '#fff' }}
         >
@@ -311,24 +466,11 @@ export default function RoomEditor({ classroomId }: Props) {
 
           <Layer>
             {classroom.walls.map(renderWall)}
-
-            {/* preview של קיר בעת ציור */}
-            {pendingPoint && isWallTool && (
-              <Line
-                points={[pendingPoint.x, pendingPoint.y, mousePos.x, mousePos.y]}
-                stroke={WALL_STYLES[tool as WallType].color}
-                strokeWidth={WALL_STYLES[tool as WallType].width}
-                dash={WALL_STYLES[tool as WallType].dash ?? [4, 4]}
-                opacity={0.5}
-                listening={false}
-              />
-            )}
-
             {classroom.fixedElements.map(renderFixedElement)}
+            {renderDraft()}
           </Layer>
         </Stage>
 
-        {/* Status bar */}
         <div style={{
           position: 'absolute',
           bottom: 6,
@@ -341,6 +483,7 @@ export default function RoomEditor({ classroomId }: Props) {
         }}>
           {mousePos.x},{mousePos.y}
           {selected && ` · נבחר: ${selected.kind === 'wall' ? 'קיר' : 'אלמנט'}`}
+          {drafting && ` · בציור: ${drafting.length} נק׳`}
         </div>
       </div>
     </div>
