@@ -44,15 +44,20 @@ export default function CsvImport({ onImport, onCancel }: Props) {
 
       <div style={{
         background: 'var(--abg)', border: '1px solid var(--abd)', borderRadius: 'var(--rs)',
-        padding: 12, marginBottom: 16, fontSize: 13, color: '#9a3412',
+        padding: 12, marginBottom: 12, fontSize: 13, color: '#9a3412',
       }}>
         <div style={{ marginBottom: 4, fontWeight: 700 }}>פורמט נתמך:</div>
         <div style={{ fontSize: 12 }}>
-          קובץ <strong>CSV</strong> או <strong>Excel (xlsx/xls)</strong> עם עמודות:
-          <br />• <strong>שם</strong> (חובה) — שם התלמיד
-          <br />• <strong>מגדר / מין</strong> (אופציונלי) — בן/בת או ז/נ
-          <br />• <strong>הערות</strong> (אופציונלי)
+          קובץ <strong>CSV</strong> או <strong>Excel</strong> רגיל / קובץ <strong>אלפון</strong> רשמי ממשו"ב.
+          האפליקציה מזהה אוטומטית עמודות "שם התלמיד" ו"מין" (גם פורמט עברי).
         </div>
+      </div>
+      <div style={{
+        background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 'var(--rs)',
+        padding: 12, marginBottom: 16, fontSize: 12, color: '#065f46',
+      }}>
+        🔒 <strong>פרטיות</strong>: האפליקציה <strong>לא קוראת ולא שומרת</strong> ת.ז, תאריכי לידה, כתובות, טלפונים, מיילים או פרטי הורים.
+        רק <strong>שם התלמיד</strong> ו<strong>מין</strong> נשמרים — מקומית במכשיר שלך בלבד.
       </div>
 
       <input
@@ -101,17 +106,18 @@ export default function CsvImport({ onImport, onCancel }: Props) {
                 <tr style={{ background: 'var(--bg)', position: 'sticky', top: 0 }}>
                   <th style={{ padding: '6px 12px', textAlign: 'right', borderBottom: '1px solid var(--bd)' }}>#</th>
                   <th style={{ padding: '6px 12px', textAlign: 'right', borderBottom: '1px solid var(--bd)' }}>שם</th>
-                  <th style={{ padding: '6px 12px', textAlign: 'right', borderBottom: '1px solid var(--bd)' }}>מגדר</th>
-                  <th style={{ padding: '6px 12px', textAlign: 'right', borderBottom: '1px solid var(--bd)' }}>הערות</th>
+                  <th style={{ padding: '6px 12px', textAlign: 'right', borderBottom: '1px solid var(--bd)' }}>מין</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid var(--bd)' }}>
                     <td style={{ padding: '6px 12px', color: 'var(--ink3)' }}>{i + 1}</td>
-                    <td style={{ padding: '6px 12px', fontWeight: 600 }}>{r.name}</td>
-                    <td style={{ padding: '6px 12px' }}>{r.gender === 'm' ? 'בן' : r.gender === 'f' ? 'בת' : '—'}</td>
-                    <td style={{ padding: '6px 12px', color: 'var(--ink3)', fontSize: 12 }}>{r.notes ?? ''}</td>
+                    <td style={{ padding: '6px 12px', fontWeight: 600,
+                                 color: r.gender === 'm' ? '#1d4ed8' : r.gender === 'f' ? '#be185d' : 'var(--ink)' }}>
+                      {r.name}
+                    </td>
+                    <td style={{ padding: '6px 12px' }}>{r.gender === 'm' ? '👦 בן' : r.gender === 'f' ? '👧 בת' : '—'}</td>
                   </tr>
                 ))}
               </tbody>

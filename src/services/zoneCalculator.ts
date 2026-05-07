@@ -30,7 +30,7 @@ function distanceToWall(p: Point, wall: Wall): number {
 // מיקום אבסולוטי של מושב (מתחשב בסיבוב של השולחן)
 export function getSeatPosition(desk: Desk, seat: Seat): Point {
   if (seat.side === 'solo') return { ...desk.position };
-  const offset = seat.side === 'left' ? -25 : 25;
+  const offset = seat.side === 'left' ? -32 : 32;
   const r = (desk.rotation * Math.PI) / 180;
   return {
     x: desk.position.x + offset * Math.cos(r),

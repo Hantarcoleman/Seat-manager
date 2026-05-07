@@ -181,17 +181,21 @@ export default function StudentManager({ classroomId }: Props) {
                              : s.responsibilityScore >= 70 ? '#ca8a04'
                              : s.responsibilityScore >= 40 ? '#0284c7'
                              : '#dc2626';
+            // צבע רקע לפי מין: בנים כחול, בנות ורוד
+            const cardBg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg2)';
+            const cardBorder = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+            const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
             return (
               <div
                 key={s.id}
                 style={{
-                  background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+                  background: cardBg, border: `1.5px solid ${cardBorder}`, borderRadius: 'var(--r)',
                   padding: 12, boxShadow: 'var(--sh)', display: 'flex', flexDirection: 'column', gap: 6,
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontWeight: 800, fontSize: 15, flex: 1 }}>
-                    {s.name} {s.gender === 'f' ? '👩' : s.gender === 'm' ? '👦' : ''}
+                  <div style={{ fontWeight: 800, fontSize: 15, flex: 1, color: nameColor }}>
+                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
                   </div>
                   <div style={{
                     background: scoreColor, color: '#fff', fontWeight: 800, fontSize: 12,

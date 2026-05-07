@@ -35,6 +35,9 @@ interface ClassroomState {
   removeDesk: (id: string) => void;
   updateSeat: (id: string, patch: Partial<Seat>) => void;
 
+  // ── ניקוי כללי ──
+  clearAll: () => void;
+
   // ── undo/redo ──
   undo: () => void;
   redo: () => void;
@@ -168,6 +171,16 @@ export const useClassroomStore = create<ClassroomState>()(
         set((s) => mutateAndRecord(s, (c) => ({
           ...c,
           seats: c.seats.map((seat) => (seat.id === id ? { ...seat, ...patch } : seat)),
+        }))),
+
+      // ── ניקוי כללי ──
+      clearAll: () =>
+        set((s) => mutateAndRecord(s, (c) => ({
+          ...c,
+          walls: [],
+          fixedElements: [],
+          desks: [],
+          seats: [],
         }))),
 
       // ── undo/redo ──

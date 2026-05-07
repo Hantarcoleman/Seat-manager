@@ -24,7 +24,7 @@ const ZONE_LABELS: Record<ZoneTag, { label: string; color: string }> = {
   near_wall:   { label: 'קיר', color: '#525252' },
 };
 
-type TemplateType = 'single' | 'pair' | 'row5' | 'cluster' | 'het' | 'u';
+type TemplateType = 'select' | 'single' | 'pair' | 'row' | 'column' | 'grid' | 'cluster' | 'het' | 'u';
 
 interface Props {
   classroomId: string;
@@ -32,27 +32,31 @@ interface Props {
 
 const snap = (v: number, gridOn: boolean) => (gridOn ? Math.round(v / 10) * 10 : v);
 
-// יצירת תבנית שולחנות במיקום נתון. מחזיר רשימת desks + seats יחסית למרכז.
+interface TemplateConfig {
+  count: number;     // לטור/שורה
+  hGap: number;      // מרווח אופקי
+  vGap: number;      // מרווח אנכי
+  rows: number;      // לגריד
+  cols: number;      // לגריד
+}
+
 interface TemplateOutput {
   desk: Omit<Desk, 'id'>;
   seats: Omit<Seat, 'id' | 'deskId'>[];
 }
 
-function buildTemplate(type: TemplateType, center: Point): TemplateOutput[] {
+function buildTemplate(type: TemplateType, center: Point, cfg: TemplateConfig): TemplateOutput[] {
   const result: TemplateOutput[] = [];
-  const PAIR_GAP_X = 90; // מרווח בין שולחנות בטור
-  const PAIR_GAP_Y = 90; // מרווח בין שורות
 
   const pairAt = (x: number, y: number, rotation = 0): TemplateOutput => ({
-    desk: { position: { x, y }, rotation, seatCount: 2 },
+    desk: { position: { x: Math.round(x), y: Math.round(y) }, rotation, seatCount: 2 },
     seats: [
       { side: 'left',  autoZones: [] },
       { side: 'right', autoZones: [] },
     ],
   });
-
   const singleAt = (x: number, y: number, rotation = 0): TemplateOutput => ({
-    desk: { position: { x, y }, rotation, seatCount: 1 },
+    desk: { position: { x: Math.round(x), y: Math.round(y) }, rotation, seatCount: 1 },
     seats: [{ side: 'solo', autoZones: [] }],
   });
 
@@ -65,18 +69,45 @@ function buildTemplate(type: TemplateType, center: Point): TemplateOutput[] {
       result.push(pairAt(center.x, center.y));
       break;
 
-    case 'row5':
-      // 5 שולחנות זוגיים בשורה אופקית
-      for (let i = 0; i < 5; i++) {
-        const x = center.x - 2 * PAIR_GAP_X + i * PAIR_GAP_X;
+    // שורה (אופקית, מימין לשמאל)
+    case 'row': {
+      const n = cfg.count;
+      const total = (n - 1) * cfg.hGap;
+      for (let i = 0; i < n; i++) {
+        const x = center.x - total / 2 + i * cfg.hGap;
         result.push(pairAt(x, center.y));
       }
       break;
+    }
+
+    // טור (אנכי, מלמעלה למטה) — שולחנות מסובבים 90° כך שהמושבים פונים החוצה
+    case 'column': {
+      const n = cfg.count;
+      const total = (n - 1) * cfg.vGap;
+      for (let i = 0; i < n; i++) {
+        const y = center.y - total / 2 + i * cfg.vGap;
+        result.push(pairAt(center.x, y, 90));
+      }
+      break;
+    }
+
+    // גריד מלא: rows × cols
+    case 'grid': {
+      const totalW = (cfg.cols - 1) * cfg.hGap;
+      const totalH = (cfg.rows - 1) * cfg.vGap;
+      for (let r = 0; r < cfg.rows; r++) {
+        for (let c = 0; c < cfg.cols; c++) {
+          const x = center.x - totalW / 2 + c * cfg.hGap;
+          const y = center.y - totalH / 2 + r * cfg.vGap;
+          result.push(pairAt(x, y));
+        }
+      }
+      break;
+    }
 
     case 'cluster': {
-      // 2x2 cluster של זוגיים (8 מושבים, 4 שולחנות)
-      const offX = PAIR_GAP_X / 2;
-      const offY = PAIR_GAP_Y / 2;
+      const offX = cfg.hGap / 2;
+      const offY = cfg.vGap / 2;
       result.push(pairAt(center.x - offX, center.y - offY));
       result.push(pairAt(center.x + offX, center.y - offY));
       result.push(pairAt(center.x - offX, center.y + offY));
@@ -85,38 +116,29 @@ function buildTemplate(type: TemplateType, center: Point): TemplateOutput[] {
     }
 
     case 'het': {
-      // ח: שתי עמודות בצדדים + שורה תחתונה
-      // עמודה ימנית (3 זוגיים, מסובבים 90°)
+      // שתי עמודות (ימין/שמאל, 3 כל אחת) + שורה תחתונה (3 זוגיים)
       for (let i = 0; i < 3; i++) {
-        result.push(pairAt(center.x + 2 * PAIR_GAP_X, center.y - PAIR_GAP_Y + i * PAIR_GAP_Y, 90));
+        result.push(pairAt(center.x + 2 * cfg.hGap, center.y - cfg.vGap + i * cfg.vGap, 90));
+        result.push(pairAt(center.x - 2 * cfg.hGap, center.y - cfg.vGap + i * cfg.vGap, 90));
       }
-      // עמודה שמאלית
-      for (let i = 0; i < 3; i++) {
-        result.push(pairAt(center.x - 2 * PAIR_GAP_X, center.y - PAIR_GAP_Y + i * PAIR_GAP_Y, 90));
-      }
-      // שורה תחתונה (3 זוגיים)
       for (let i = -1; i <= 1; i++) {
-        result.push(pairAt(center.x + i * PAIR_GAP_X, center.y + 2 * PAIR_GAP_Y));
+        result.push(pairAt(center.x + i * cfg.hGap, center.y + 2 * cfg.vGap));
       }
       break;
     }
 
     case 'u': {
-      // U: שתי עמודות + שורה עליונה
       for (let i = 0; i < 3; i++) {
-        result.push(pairAt(center.x + 2 * PAIR_GAP_X, center.y - PAIR_GAP_Y + i * PAIR_GAP_Y, 90));
-      }
-      for (let i = 0; i < 3; i++) {
-        result.push(pairAt(center.x - 2 * PAIR_GAP_X, center.y - PAIR_GAP_Y + i * PAIR_GAP_Y, 90));
+        result.push(pairAt(center.x + 2 * cfg.hGap, center.y - cfg.vGap + i * cfg.vGap, 90));
+        result.push(pairAt(center.x - 2 * cfg.hGap, center.y - cfg.vGap + i * cfg.vGap, 90));
       }
       for (let i = -1; i <= 1; i++) {
-        result.push(pairAt(center.x + i * PAIR_GAP_X, center.y - 2 * PAIR_GAP_Y));
+        result.push(pairAt(center.x + i * cfg.hGap, center.y - 2 * cfg.vGap));
       }
       break;
     }
   }
 
-  // הקצה layoutGroup לכולם (אם יש יותר מ-1)
   if (result.length > 1) {
     const groupId = Math.random().toString(36).slice(2, 8);
     result.forEach((r) => { r.desk.layoutGroup = groupId; });
@@ -125,13 +147,20 @@ function buildTemplate(type: TemplateType, center: Point): TemplateOutput[] {
 }
 
 const TEMPLATE_INFO: Record<TemplateType, { label: string; emoji: string; desc: string }> = {
+  select:  { label: 'בחירה', emoji: '↖', desc: 'בחר ומחק שולחנות' },
   single:  { label: 'יחיד',  emoji: '🪑', desc: 'שולחן עם מקום אחד' },
   pair:    { label: 'זוגי',  emoji: '👥', desc: 'שולחן עם 2 מקומות' },
-  row5:    { label: 'טור',   emoji: '➡',  desc: '5 שולחנות זוגיים בשורה' },
-  cluster: { label: 'גוש',   emoji: '⊞',  desc: '4 זוגיים בריבוע' },
+  row:     { label: 'שורה',  emoji: '➡',  desc: 'שורת שולחנות אופקית (מימין לשמאל)' },
+  column:  { label: 'טור',   emoji: '⬇',  desc: 'טור שולחנות אנכי (מלמעלה למטה)' },
+  grid:    { label: 'גריד',  emoji: '⊞',  desc: 'גריד מלא: שורות × טורים' },
+  cluster: { label: 'גוש',   emoji: '◫',  desc: '4 זוגיים בריבוע' },
   het:     { label: 'ח',     emoji: 'ח',  desc: 'צורת ח (3 צדדים)' },
   u:       { label: 'U',     emoji: 'U',  desc: 'צורת U (3 צדדים)' },
 };
+
+const NEEDS_COUNT = (t: TemplateType) => t === 'row' || t === 'column';
+const NEEDS_GRID = (t: TemplateType) => t === 'grid';
+const NEEDS_GAP = (t: TemplateType) => t === 'row' || t === 'column' || t === 'grid' || t === 'cluster' || t === 'het' || t === 'u';
 
 export default function DeskLayoutEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
@@ -139,20 +168,28 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const updateDesk = useClassroomStore((s) => s.updateDesk);
   const removeDesk = useClassroomStore((s) => s.removeDesk);
   const updateSeat = useClassroomStore((s) => s.updateSeat);
+  const clearAll = useClassroomStore((s) => s.clearAll);
   const undo = useClassroomStore((s) => s.undo);
   const redo = useClassroomStore((s) => s.redo);
   const historyDepth = useClassroomStore((s) => (s.currentId ? s._history[s.currentId]?.length ?? 0 : 0));
   const futureDepth  = useClassroomStore((s) => (s.currentId ? s._future[s.currentId]?.length ?? 0 : 0));
 
   const [template, setTemplate] = useState<TemplateType>('pair');
+  const [cfg, setCfg] = useState<TemplateConfig>({ count: 5, hGap: 160, vGap: 110, rows: 4, cols: 5 });
   const [gridOn, setGridOn] = useState(true);
-  const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
-  const [selectedDeskId, setSelectedDeskId] = useState<string | null>(null);
   const [showZones, setShowZones] = useState(true);
+  const [mousePos, setMousePos] = useState<Point>({ x: 0, y: 0 });
+  // multi-select של שולחנות
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // rubber-band selection
+  const [rubberStart, setRubberStart] = useState<Point | null>(null);
+  const [rubberEnd, setRubberEnd] = useState<Point | null>(null);
 
   const stageRef = useRef<Konva.Stage>(null);
 
-  // חישוב מחדש של אזורים אוטומטיים אחרי כל שינוי
+  const isSelectMode = template === 'select';
+
+  // חישוב אזורים אוטומטיים
   useEffect(() => {
     if (!classroom) return;
     const map = computeAllAutoZones(classroom);
@@ -168,36 +205,68 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   // מקלדת
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
-        e.preventDefault(); undo(); return;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) { e.preventDefault(); redo(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedIds.size > 0) {
+          selectedIds.forEach((id) => removeDesk(id));
+          setSelectedIds(new Set());
+        }
       }
-      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
-        e.preventDefault(); redo(); return;
-      }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedDeskId) {
-        removeDesk(selectedDeskId);
-        setSelectedDeskId(null);
-      }
-      if (e.key === 'Escape') setSelectedDeskId(null);
+      if (e.key === 'Escape') { setSelectedIds(new Set()); setRubberStart(null); setRubberEnd(null); }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedDeskId, undo, redo, removeDesk]);
+  }, [selectedIds, undo, redo, removeDesk]);
 
   if (!classroom) return null;
 
-  // לחיצה על הקנבס = הצבת תבנית (רק אם לא לחצו על שולחן קיים)
+  // ── עכבר ──────────────────────────────────────────
+  const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.target !== stageRef.current) return;
+    if (!isSelectMode) return;
+    const stage = stageRef.current;
+    if (!stage) return;
+    const pos = stage.getPointerPosition();
+    if (!pos) return;
+    const p = { x: pos.x, y: pos.y };
+    setRubberStart(p);
+    setRubberEnd(p);
+    if (!e.evt.shiftKey) setSelectedIds(new Set());
+  };
+
+  const onStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (e.target !== stageRef.current) return;
+    if (!isSelectMode || !rubberStart || !rubberEnd) {
+      setRubberStart(null); setRubberEnd(null);
+      return;
+    }
+    const x1 = Math.min(rubberStart.x, rubberEnd.x);
+    const y1 = Math.min(rubberStart.y, rubberEnd.y);
+    const x2 = Math.max(rubberStart.x, rubberEnd.x);
+    const y2 = Math.max(rubberStart.y, rubberEnd.y);
+    // אם הריבוע גדול מספיק — בחר את כל השולחנות בתוכו
+    if (x2 - x1 > 6 || y2 - y1 > 6) {
+      const inside = classroom.desks.filter((d) =>
+        d.position.x >= x1 && d.position.x <= x2 && d.position.y >= y1 && d.position.y <= y2
+      );
+      const next = e.evt.shiftKey ? new Set(selectedIds) : new Set<string>();
+      inside.forEach((d) => next.add(d.id));
+      setSelectedIds(next);
+    }
+    setRubberStart(null); setRubberEnd(null);
+  };
+
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.target !== stageRef.current) return;
+    if (isSelectMode) return; // טיפול ב-mouseup
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
     const center = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
-
-    const items = buildTemplate(template, center);
+    const items = buildTemplate(template, center, cfg);
     items.forEach((item) => addDesk(item.desk, item.seats));
-    setSelectedDeskId(null);
   };
 
   const onStageMouseMove = () => {
@@ -205,7 +274,11 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
+    if (isSelectMode && rubberStart) {
+      setRubberEnd({ x: pos.x, y: pos.y });
+    } else {
+      setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
+    }
   };
 
   // ── רינדור ─────────────────────────────────────────
@@ -227,16 +300,8 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     const flat: number[] = [];
     w.points.forEach((p) => { flat.push(p.x, p.y); });
     return (
-      <Line
-        key={w.id}
-        points={flat}
-        stroke={style.color}
-        strokeWidth={style.width}
-        dash={style.dash}
-        lineCap="round"
-        lineJoin="round"
-        listening={false}
-      />
+      <Line key={w.id} points={flat} stroke={style.color} strokeWidth={style.width}
+            dash={style.dash} lineCap="round" lineJoin="round" listening={false} />
     );
   };
 
@@ -258,11 +323,9 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
 
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
-    const isSelected = selectedDeskId === desk.id;
-    const w = desk.seatCount === 2 ? 70 : 45;
-    const h = 45;
-
-    // תווית של אזורים — ניקח מהמושב הראשון (כרגע משותף)
+    const isSelected = selectedIds.has(desk.id);
+    const w = desk.seatCount === 2 ? 130 : 80;
+    const h = 70;
     const zones = seats[0]?.autoZones ?? [];
 
     return (
@@ -271,65 +334,61 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
         x={desk.position.x}
         y={desk.position.y}
         rotation={desk.rotation}
-        draggable
-        onClick={() => setSelectedDeskId(desk.id)}
-        onTap={() => setSelectedDeskId(desk.id)}
+        draggable={!isSelectMode}
+        onClick={(e) => {
+          e.cancelBubble = true;
+          if (e.evt.shiftKey) {
+            const next = new Set(selectedIds);
+            if (next.has(desk.id)) next.delete(desk.id); else next.add(desk.id);
+            setSelectedIds(next);
+          } else {
+            setSelectedIds(new Set([desk.id]));
+          }
+        }}
+        onTap={(e) => {
+          e.cancelBubble = true;
+          setSelectedIds(new Set([desk.id]));
+        }}
         onDragEnd={(e) => {
           updateDesk(desk.id, {
             position: { x: snap(e.target.x(), gridOn), y: snap(e.target.y(), gridOn) },
           });
         }}
       >
-        {/* גוף השולחן */}
         <Rect
           x={-w / 2} y={-h / 2} width={w} height={h}
           fill="#e7e5e4"
           stroke={isSelected ? '#ea580c' : '#78716c'}
-          strokeWidth={isSelected ? 3 : 1.5}
+          strokeWidth={isSelected ? 4 : 1.5}
           cornerRadius={6}
         />
-        {/* מושבים — עיגולים */}
         {seats.map((seat) => {
-          const dx = seat.side === 'solo' ? 0 : (seat.side === 'left' ? -16 : 16);
+          const dx = seat.side === 'solo' ? 0 : (seat.side === 'left' ? -32 : 32);
           return (
-            <Circle
-              key={seat.id}
-              x={dx}
-              y={0}
-              radius={11}
-              fill="#fff"
-              stroke="#16a34a"
-              strokeWidth={2}
-            />
+            <Circle key={seat.id} x={dx} y={0} radius={18}
+                    fill="#fff" stroke="#16a34a" strokeWidth={2.5} />
           );
         })}
-        {/* תוויות אזורים (ב-canvas — מתחת לשולחן) */}
         {showZones && zones.length > 0 && (
           <Text
-            x={-w / 2}
-            y={h / 2 + 4}
-            width={w}
-            align="center"
+            x={-w / 2} y={h / 2 + 4} width={w} align="center"
             text={zones.map((z) => ZONE_LABELS[z]?.label ?? z).join(' · ')}
-            fontSize={9}
-            fontFamily="Heebo"
-            fill={ZONE_LABELS[zones[0]]?.color ?? 'var(--ink3)'}
-            fontStyle="bold"
+            fontSize={9} fontFamily="Heebo"
+            fill={ZONE_LABELS[zones[0]]?.color ?? '#a8a29e'} fontStyle="bold"
           />
         )}
       </Group>
     );
   };
 
-  // תצוגה מקדימה של התבנית בעת ריחוף
   const renderPreview = () => {
-    if (!mousePos) return null;
-    const items = buildTemplate(template, mousePos);
+    if (isSelectMode) return null;
+    const items = buildTemplate(template, mousePos, cfg);
     return (
       <Group listening={false} opacity={0.4}>
         {items.map((item, i) => {
-          const w = item.desk.seatCount === 2 ? 70 : 45;
-          const h = 45;
+          const w = item.desk.seatCount === 2 ? 130 : 80;
+          const h = 70;
           return (
             <Group key={i} x={item.desk.position.x} y={item.desk.position.y} rotation={item.desk.rotation}>
               <Rect x={-w / 2} y={-h / 2} width={w} height={h}
@@ -341,27 +400,33 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     );
   };
 
+  const renderRubberBand = () => {
+    if (!rubberStart || !rubberEnd) return null;
+    const x = Math.min(rubberStart.x, rubberEnd.x);
+    const y = Math.min(rubberStart.y, rubberEnd.y);
+    const w = Math.abs(rubberEnd.x - rubberStart.x);
+    const h = Math.abs(rubberEnd.y - rubberStart.y);
+    return (
+      <Rect x={x} y={y} width={w} height={h}
+            fill="rgba(234, 88, 12, 0.1)" stroke="#ea580c" strokeWidth={1.5} dash={[5, 4]} listening={false} />
+    );
+  };
+
+  // ── UI ─────────────────────────────────────────────
   const TemplateButton = ({ type }: { type: TemplateType }) => {
     const info = TEMPLATE_INFO[type];
     const active = template === type;
     return (
       <button
-        onClick={() => setTemplate(type)}
+        onClick={() => { setTemplate(type); setSelectedIds(new Set()); }}
         title={info.desc}
         style={{
           background: active ? 'var(--ac)' : 'var(--bg2)',
           color: active ? '#fff' : 'var(--ink)',
           border: `1.5px solid ${active ? 'var(--ac)' : 'var(--bd2)'}`,
-          borderRadius: 'var(--rs)',
-          padding: '10px 14px',
-          fontSize: 13,
-          fontWeight: 700,
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 2,
+          borderRadius: 'var(--rs)', padding: '10px 14px', fontSize: 13, fontWeight: 700,
+          cursor: 'pointer', fontFamily: 'inherit',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
           minWidth: 70,
         }}
       >
@@ -381,39 +446,85 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
         background: 'var(--bg2)',
         color: disabled ? 'var(--ink3)' : (danger ? 'var(--rd)' : 'var(--ink)'),
         border: `1.5px solid ${disabled ? 'var(--bd)' : (danger ? '#fecaca' : 'var(--bd2)')}`,
-        borderRadius: 'var(--rs)',
-        padding: '8px 12px',
-        fontSize: 13,
-        fontWeight: 700,
-        cursor: disabled ? 'not-allowed' : 'pointer',
-        opacity: disabled ? 0.5 : 1,
-        fontFamily: 'inherit',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
+        borderRadius: 'var(--rs)', padding: '8px 12px', fontSize: 13, fontWeight: 700,
+        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+        fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
       }}
     >
-      <span style={{ fontSize: 16 }}>{emoji}</span>
-      <span>{label}</span>
+      <span style={{ fontSize: 16 }}>{emoji}</span><span>{label}</span>
     </button>
   );
 
-  // סטטיסטיקה
-  const totalSeats = classroom.seats.length;
+  // אינפוט מספרי
+  const NumberInput = ({ label, value, onChange, min, max }: {
+    label: string; value: number; onChange: (v: number) => void; min: number; max: number;
+  }) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink2)' }}>
+      <span style={{ fontWeight: 700 }}>{label}:</span>
+      <input
+        type="number" value={value} min={min} max={max}
+        onChange={(e) => onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))}
+        style={{
+          width: 64, padding: '4px 8px', fontSize: 13,
+          border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+          fontFamily: 'inherit', textAlign: 'center',
+        }}
+      />
+    </label>
+  );
 
   return (
     <div>
-      {/* תבניות */}
+      {/* ── תבניות ── */}
       <div style={{
         background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
         padding: 12, marginBottom: 8, boxShadow: 'var(--sh)',
         display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
       }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink2)', marginLeft: 4 }}>תבניות:</span>
-        {(Object.keys(TEMPLATE_INFO) as TemplateType[]).map((t) => <TemplateButton key={t} type={t} />)}
+        <TemplateButton type="select" />
+        <div style={{ width: 1, height: 36, background: 'var(--bd2)' }} />
+        <TemplateButton type="single" />
+        <TemplateButton type="pair" />
+        <TemplateButton type="row" />
+        <TemplateButton type="column" />
+        <TemplateButton type="grid" />
+        <TemplateButton type="cluster" />
+        <TemplateButton type="het" />
+        <TemplateButton type="u" />
       </div>
 
-      {/* פעולות */}
+      {/* ── הגדרות תבנית ── */}
+      {!isSelectMode && (NEEDS_COUNT(template) || NEEDS_GRID(template) || NEEDS_GAP(template)) && (
+        <div style={{
+          background: '#fff7ed', border: '1.5px solid #fed7aa', borderRadius: 'var(--r)',
+          padding: 10, marginBottom: 8,
+          display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'center',
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: '#9a3412' }}>הגדרות תבנית:</span>
+          {NEEDS_COUNT(template) && (
+            <NumberInput label="כמות" value={cfg.count} min={2} max={20}
+                         onChange={(v) => setCfg({ ...cfg, count: v })} />
+          )}
+          {NEEDS_GRID(template) && (
+            <>
+              <NumberInput label="שורות" value={cfg.rows} min={1} max={12}
+                           onChange={(v) => setCfg({ ...cfg, rows: v })} />
+              <NumberInput label="טורים" value={cfg.cols} min={1} max={12}
+                           onChange={(v) => setCfg({ ...cfg, cols: v })} />
+            </>
+          )}
+          {NEEDS_GAP(template) && (template === 'row' || template === 'grid' || template === 'cluster' || template === 'het' || template === 'u') && (
+            <NumberInput label="מרווח אופקי" value={cfg.hGap} min={80} max={300}
+                         onChange={(v) => setCfg({ ...cfg, hGap: v })} />
+          )}
+          {NEEDS_GAP(template) && (template === 'column' || template === 'grid' || template === 'cluster' || template === 'het' || template === 'u') && (
+            <NumberInput label="מרווח אנכי" value={cfg.vGap} min={80} max={300}
+                         onChange={(v) => setCfg({ ...cfg, vGap: v })} />
+          )}
+        </div>
+      )}
+
+      {/* ── פעולות ── */}
       <div style={{
         background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
         padding: 10, marginBottom: 12, boxShadow: 'var(--sh)',
@@ -422,15 +533,32 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
         <ActionButton onClick={undo} disabled={historyDepth === 0} emoji="↶" label={`ביטול${historyDepth ? ` (${historyDepth})` : ''}`} />
         <ActionButton onClick={redo} disabled={futureDepth === 0}  emoji="↷" label={`הבא${futureDepth ? ` (${futureDepth})` : ''}`} />
         <ActionButton
-          onClick={() => { if (selectedDeskId) { removeDesk(selectedDeskId); setSelectedDeskId(null); } }}
-          disabled={!selectedDeskId}
+          onClick={() => {
+            if (selectedIds.size === 0) return;
+            selectedIds.forEach((id) => removeDesk(id));
+            setSelectedIds(new Set());
+          }}
+          disabled={selectedIds.size === 0}
           emoji="🗑"
-          label="מחק שולחן"
+          label={selectedIds.size > 1 ? `מחק ${selectedIds.size} שולחנות` : 'מחק שולחן'}
+          danger
+        />
+        <ActionButton
+          onClick={() => {
+            if (classroom.desks.length === 0 && classroom.walls.length === 0) return;
+            if (confirm('למחוק את כל השולחנות, הקירות והאלמנטים בכיתה? פעולה זו לא ניתנת לביטול בלחיצה אחת (אבל אפשר לבטל ב-↶).')) {
+              clearAll();
+              setSelectedIds(new Set());
+            }
+          }}
+          emoji="🧨"
+          label="מחק הכל"
           danger
         />
         <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
           <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
-            <strong>{classroom.desks.length}</strong> שולחנות · <strong>{totalSeats}</strong> מושבים
+            <strong>{classroom.desks.length}</strong> שולחנות · <strong>{classroom.seats.length}</strong> מושבים
+            {selectedIds.size > 0 && <span style={{ color: 'var(--ac)', fontWeight: 700 }}> · {selectedIds.size} נבחרו</span>}
           </span>
           <label style={{ fontSize: 13, color: 'var(--ink2)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
             <input type="checkbox" checked={showZones} onChange={(e) => setShowZones(e.target.checked)} />
@@ -444,7 +572,9 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
       </div>
 
       <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>
-        💡 בחר תבנית ולחץ על המקום בקנבס. גרור שולחן להזיז. בחר שולחן + Delete למחוק.
+        {isSelectMode
+          ? '💡 בחר שולחנות בלחיצה (Shift = הוספה לבחירה). גרור על אזור ריק ליצירת ריבוע בחירה. Delete מוחק את הנבחרים.'
+          : '💡 לחץ על המקום בקנבס להצבת התבנית. לאחר ההצבה — גרור שולחן להזיז.'}
       </div>
 
       <div style={{
@@ -455,10 +585,12 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           ref={stageRef}
           width={classroom.width}
           height={classroom.height}
+          onMouseDown={onStageMouseDown}
+          onMouseUp={onStageMouseUp}
           onClick={onStageClick}
           onTap={onStageClick}
           onMouseMove={onStageMouseMove}
-          style={{ cursor: 'crosshair', background: '#fff' }}
+          style={{ cursor: isSelectMode ? 'default' : 'crosshair', background: '#fff' }}
         >
           <Layer listening={false}>{renderGrid()}</Layer>
           <Layer>
@@ -466,6 +598,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
             {classroom.fixedElements.map(renderTeacherDesk)}
             {classroom.desks.map(renderDesk)}
             {renderPreview()}
+            {renderRubberBand()}
           </Layer>
         </Stage>
 
@@ -474,7 +607,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           background: 'rgba(255,255,255,.85)', padding: '2px 8px', borderRadius: 4,
         }}>
           {mousePos.x},{mousePos.y}
-          {selectedDeskId && ' · נבחר שולחן'}
+          {selectedIds.size > 0 && ` · ${selectedIds.size} נבחרו`}
         </div>
       </div>
     </div>
