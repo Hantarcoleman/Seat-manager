@@ -455,23 +455,44 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     </button>
   );
 
-  // אינפוט מספרי
-  const NumberInput = ({ label, value, onChange, min, max }: {
-    label: string; value: number; onChange: (v: number) => void; min: number; max: number;
-  }) => (
-    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: 'var(--ink2)' }}>
-      <span style={{ fontWeight: 700 }}>{label}:</span>
-      <input
-        type="number" value={value} min={min} max={max}
-        onChange={(e) => onChange(Math.max(min, Math.min(max, Number(e.target.value) || min)))}
-        style={{
-          width: 64, padding: '4px 8px', fontSize: 13,
-          border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
-          fontFamily: 'inherit', textAlign: 'center',
-        }}
-      />
-    </label>
-  );
+  // אינפוט מספרי עם +/- ועריכה חופשית
+  const NumberInput = ({ label, value, onChange, min, max, step = 10 }: {
+    label: string; value: number; onChange: (v: number) => void; min: number; max: number; step?: number;
+  }) => {
+    const [text, setText] = useState(String(value));
+    useEffect(() => { setText(String(value)); }, [value]);
+    const commit = () => {
+      const n = parseInt(text, 10);
+      if (!isNaN(n)) onChange(Math.max(min, Math.min(max, n)));
+      else setText(String(value));
+    };
+    const btnStyle = {
+      width: 26, height: 30, padding: 0, fontSize: 16, fontWeight: 800,
+      background: 'var(--bg2)', color: 'var(--ink2)',
+      border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+      cursor: 'pointer', fontFamily: 'inherit', lineHeight: 1,
+    } as const;
+    return (
+      <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 13, color: 'var(--ink2)' }}>
+        <span style={{ fontWeight: 700, marginLeft: 4 }}>{label}:</span>
+        <button type="button" style={btnStyle} title={`-${step}`}
+          onClick={() => onChange(Math.max(min, value - step))}>−</button>
+        <input
+          type="text" inputMode="numeric" value={text}
+          onChange={(e) => setText(e.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') { (e.target as HTMLInputElement).blur(); } }}
+          style={{
+            width: 50, padding: '5px 6px', fontSize: 14, fontWeight: 700,
+            border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+            fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
+          }}
+        />
+        <button type="button" style={btnStyle} title={`+${step}`}
+          onClick={() => onChange(Math.min(max, value + step))}>+</button>
+      </label>
+    );
+  };
 
   return (
     <div>
@@ -502,23 +523,23 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
         }}>
           <span style={{ fontSize: 13, fontWeight: 800, color: '#9a3412' }}>הגדרות תבנית:</span>
           {NEEDS_COUNT(template) && (
-            <NumberInput label="כמות" value={cfg.count} min={2} max={20}
+            <NumberInput label="כמות" value={cfg.count} min={2} max={20} step={1}
                          onChange={(v) => setCfg({ ...cfg, count: v })} />
           )}
           {NEEDS_GRID(template) && (
             <>
-              <NumberInput label="שורות" value={cfg.rows} min={1} max={12}
+              <NumberInput label="שורות" value={cfg.rows} min={1} max={12} step={1}
                            onChange={(v) => setCfg({ ...cfg, rows: v })} />
-              <NumberInput label="טורים" value={cfg.cols} min={1} max={12}
+              <NumberInput label="טורים" value={cfg.cols} min={1} max={12} step={1}
                            onChange={(v) => setCfg({ ...cfg, cols: v })} />
             </>
           )}
           {NEEDS_GAP(template) && (template === 'row' || template === 'grid' || template === 'cluster' || template === 'het' || template === 'u') && (
-            <NumberInput label="מרווח אופקי" value={cfg.hGap} min={80} max={300}
+            <NumberInput label="מרווח אופקי" value={cfg.hGap} min={80} max={300} step={10}
                          onChange={(v) => setCfg({ ...cfg, hGap: v })} />
           )}
           {NEEDS_GAP(template) && (template === 'column' || template === 'grid' || template === 'cluster' || template === 'het' || template === 'u') && (
-            <NumberInput label="מרווח אנכי" value={cfg.vGap} min={80} max={300}
+            <NumberInput label="מרווח אנכי" value={cfg.vGap} min={80} max={300} step={10}
                          onChange={(v) => setCfg({ ...cfg, vGap: v })} />
           )}
         </div>

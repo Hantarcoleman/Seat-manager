@@ -86,7 +86,8 @@ export interface Seat {
 export type StudentTag =
   | 'vision_needs_front'   // צריך לשבת קדימה בגלל ראייה
   | 'adhd_needs_front'     // צריך לשבת קדימה בגלל קשיי קשב
-  | 'tall'                 // גבוה
+  | 'tall'                 // גבוה — עדיף בצדדים או מאחור
+  | 'needs_wall'           // צריך קיר (סיוע יציבה / רוגע)
   | 'quiet'                // שקט
   | 'talkative'            // דברן
   | 'distractible'         // נוטה להסחה
@@ -100,8 +101,7 @@ export interface Student {
   gender?: 'm' | 'f';
   tags: StudentTag[];
   preferredNear: string[]; // ids של תלמידים שעובד טוב לידם
-  avoidNear: string[];     // ids של תלמידים שלא מומלץ להושיב לידם
-  mustSeparate: string[];  // ids של תלמידים שחייבים הפרדה
+  avoidNear: string[];     // ids של תלמידים שלא מומלץ להושיב לידם / חייבים הפרדה
   responsibilityScore: number; // 0–100, ברירת מחדל 70
   notes?: string;
 }

@@ -8,6 +8,7 @@ const TAG_LABELS: Record<StudentTag, string> = {
   vision_needs_front:  '👓 ראייה',
   adhd_needs_front:    '🎯 קשב',
   tall:                '📏 גבוה',
+  needs_wall:          '🧱 קיר',
   quiet:               '🤫 שקט',
   talkative:           '💬 דברן',
   distractible:        '🌀 מוסח',
@@ -215,11 +216,10 @@ export default function StudentManager({ classroomId }: Props) {
                     ))}
                   </div>
                 )}
-                {(s.preferredNear.length > 0 || s.avoidNear.length > 0 || s.mustSeparate.length > 0) && (
+                {(s.preferredNear.length > 0 || s.avoidNear.length > 0) && (
                   <div style={{ fontSize: 11, color: 'var(--ink3)' }}>
                     {s.preferredNear.length > 0 && <span>✓ {s.preferredNear.length} </span>}
-                    {s.avoidNear.length > 0 && <span>⚠ {s.avoidNear.length} </span>}
-                    {s.mustSeparate.length > 0 && <span>🚫 {s.mustSeparate.length}</span>}
+                    {s.avoidNear.length > 0 && <span>⚠ {s.avoidNear.length}</span>}
                   </div>
                 )}
                 <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>

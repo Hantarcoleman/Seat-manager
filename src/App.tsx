@@ -3,6 +3,7 @@ import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
 import DeskLayoutPage from './pages/DeskLayoutPage';
 import StudentsPage from './pages/StudentsPage';
+import SeatingPage from './pages/SeatingPage';
 import './App.css';
 
 function App() {
@@ -31,6 +32,7 @@ function App() {
             <Route path="/classroom/:id/setup" element={<ClassroomSetup />} />
             <Route path="/classroom/:id/desks" element={<DeskLayoutPage />} />
             <Route path="/classroom/:id/students" element={<StudentsPage />} />
+            <Route path="/classroom/:id/seating" element={<SeatingPage />} />
           </Routes>
         </main>
       </div>

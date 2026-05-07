@@ -128,7 +128,6 @@ export function importRowsToStudents(rows: ImportRow[]): Omit<Student, 'id'>[] {
     tags: r.tags ?? [],
     preferredNear: [],
     avoidNear: [],
-    mustSeparate: [],
     responsibilityScore: 70,
     notes: undefined,
   }));
