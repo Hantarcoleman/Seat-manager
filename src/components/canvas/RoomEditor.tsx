@@ -4,6 +4,7 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import type { WallType, FixedElementType, Point, Wall, FixedElement, WallPoint, Desk } from '../../types';
 import { buildGenericClassroom } from '../../services/classroomTemplates';
+import { tryEmbedDoor, tryEmbedSegment } from '../../services/wallGeometry';
 
 const WALL_STYLES: Record<WallType, { color: string; width: number; dash?: number[]; label: string; emoji: string }> = {
   blank:        { color: '#1c1917', width: 6,                       label: 'קיר אטום',    emoji: '⬛' },
@@ -146,7 +147,20 @@ export default function RoomEditor({ classroomId }: Props) {
 
   const finishDraft = () => {
     if (drafting && draftingType && drafting.length >= 2) {
-      addWall({ type: draftingType, points: drafting });
+      // לחלון/דלת מנסים להטמיע בקיר קיים אם הקטע צמוד אליו
+      const isOpening = draftingType === 'window_lobby' || draftingType === 'window_yard'
+                     || draftingType === 'small_window' || draftingType === 'door';
+      if (isOpening && drafting.length === 2) {
+        const embed = tryEmbedSegment(classroom?.walls ?? [], draftingType, drafting);
+        if (embed) {
+          removeWall(embed.removeWallId);
+          embed.newWalls.forEach((w) => addWall(w));
+        } else {
+          addWall({ type: draftingType, points: drafting });
+        }
+      } else {
+        addWall({ type: draftingType, points: drafting });
+      }
     }
     setDrafting(null);
     setDraftingType(null);
@@ -319,7 +333,14 @@ export default function RoomEditor({ classroomId }: Props) {
     }
 
     if (isDoorTool) {
-      addWall({ type: 'door', points: [{ x: p.x - 30, y: p.y }, { x: p.x + 30, y: p.y }] });
+      // אם לחצנו על קיר קיים — נטמיע את הדלת בתוכו (ניהפך אותו לדלת בקטע הזה)
+      const embed = tryEmbedDoor(classroom.walls, p);
+      if (embed) {
+        removeWall(embed.removeWallId);
+        embed.newWalls.forEach((w) => addWall(w));
+      } else {
+        addWall({ type: 'door', points: [{ x: p.x - 30, y: p.y }, { x: p.x + 30, y: p.y }] });
+      }
       return;
     }
 

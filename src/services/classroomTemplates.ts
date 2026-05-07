@@ -7,51 +7,60 @@ export interface TemplateOutput {
   fixedElements: Omit<FixedElement, 'id'>[];
 }
 
-// כיתה גנרית: חדר מלבני עם לוח על הקיר התחתון, ומערך שולחנות זוגיים בגריד
+// מידות שולחן זוגי (חייבות להיות מסונכרנות עם DeskLayoutEditor)
+const PAIR_W = 130;
+const PAIR_H = 70;
+const TEACHER_W = 130;
+const TEACHER_H = 60;
+
+// כיתה גנרית: חדר מלבני עם לוח על הקיר התחתון, שולחן מורה ליד הלוח,
+// וגריד שולחנות זוגיים פרוס באופן אחיד **בתוך** הקירות.
 export function buildGenericClassroom(rows: number, cols: number, canvasWidth: number, canvasHeight: number): TemplateOutput {
-  const padding = 70; // שוליים פנימיים
+  const padding = 70; // מרווח של החדר מקצה הקנבס
   const x1 = padding;
   const y1 = padding;
   const x2 = canvasWidth - padding;
   const y2 = canvasHeight - padding;
 
   const walls: Omit<Wall, 'id'>[] = [
-    // עליון — קיר אטום
-    { type: 'blank', points: [{ x: x1, y: y1 }, { x: x2, y: y1 }] },
-    // ימני
-    { type: 'blank', points: [{ x: x2, y: y1 }, { x: x2, y: y2 }] },
-    // שמאלי
-    { type: 'blank', points: [{ x: x1, y: y2 }, { x: x1, y: y1 }] },
-    // תחתון — לוח (כל הרוחב)
-    { type: 'board', points: [{ x: x1, y: y2 }, { x: x2, y: y2 }] },
+    { type: 'blank', points: [{ x: x1, y: y1 }, { x: x2, y: y1 }] },          // עליון
+    { type: 'blank', points: [{ x: x2, y: y1 }, { x: x2, y: y2 }] },          // ימני
+    { type: 'blank', points: [{ x: x1, y: y2 }, { x: x1, y: y1 }] },          // שמאלי
+    { type: 'board', points: [{ x: x1, y: y2 }, { x: x2, y: y2 }] },          // תחתון = לוח
   ];
 
-  // שולחן מורה ליד הלוח
+  // שולחן מורה ליד הלוח, בלי לחרוג ממנו
+  const teacherCenterY = y2 - TEACHER_H / 2 - 15;
   const fixedElements: Omit<FixedElement, 'id'>[] = [
     {
       type: 'teacher_desk_single',
-      position: { x: (x1 + x2) / 2, y: y2 - 70 },
+      position: { x: Math.round((x1 + x2) / 2), y: Math.round(teacherCenterY) },
       rotation: 0,
-      width: 130,
-      height: 60,
+      width: TEACHER_W,
+      height: TEACHER_H,
     },
   ];
 
-  // גריד שולחנות זוגיים
-  const desks: TemplateOutput['desks'] = [];
-  // מקום פנוי בתוך החדר לשולחנות
-  const usableTop = y1 + 60;
-  const usableBottom = y2 - 150; // מקום ללוח+שולחן מורה
-  const usableLeft = x1 + 60;
-  const usableRight = x2 - 60;
-  const usableW = usableRight - usableLeft;
-  const usableH = usableBottom - usableTop;
+  // אזור שמיש לשולחנות — מבטיח שהשולחנות (130x70) לא חורגים מהקירות
+  const INNER_MARGIN = 25;                    // מרחק שולחן מקיר
+  const TEACHER_CLEARANCE = TEACHER_H + 30;   // מקום לשולחן המורה+מעט
 
-  // כל מקום ב-grid יקבל שולחן זוגי
+  const usableLeft   = x1 + PAIR_W / 2 + INNER_MARGIN;
+  const usableRight  = x2 - PAIR_W / 2 - INNER_MARGIN;
+  const usableTop    = y1 + PAIR_H / 2 + INNER_MARGIN;
+  const usableBottom = y2 - PAIR_H / 2 - TEACHER_CLEARANCE;
+  const usableW = Math.max(0, usableRight - usableLeft);
+  const usableH = Math.max(0, usableBottom - usableTop);
+
+  const desks: TemplateOutput['desks'] = [];
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const cx = usableLeft + (cols === 1 ? usableW / 2 : (usableW * c) / (cols - 1));
-      const cy = usableTop  + (rows === 1 ? usableH / 2 : (usableH * r) / (rows - 1));
+      const cx = cols === 1
+        ? (usableLeft + usableRight) / 2
+        : usableLeft + (usableW * c) / (cols - 1);
+      const cy = rows === 1
+        ? (usableTop + usableBottom) / 2
+        : usableTop  + (usableH * r) / (rows - 1);
       desks.push({
         desk: {
           position: { x: Math.round(cx), y: Math.round(cy) },
