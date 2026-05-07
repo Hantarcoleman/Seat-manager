@@ -107,7 +107,7 @@ export default function RoomEditor({ classroomId }: Props) {
   const historyDepth = useClassroomStore((s) => (s.currentId ? s._history[s.currentId]?.length ?? 0 : 0));
   const futureDepth  = useClassroomStore((s) => (s.currentId ? s._future[s.currentId]?.length ?? 0 : 0));
 
-  const [tool, setTool] = useState<ToolMode>('shape_rect');
+  const [tool, setTool] = useState<ToolMode>('select');
   const [gridOn, setGridOn] = useState(true);
   const [straightOn, setStraightOn] = useState(true);
   const [showDesks, setShowDesks] = useState(true);
@@ -401,10 +401,14 @@ export default function RoomEditor({ classroomId }: Props) {
     w.points.forEach((p) => { flat.push(p.x, p.y); });
     return (
       <Group key={w.id}>
+        {/* קו אחד עם hitStrokeWidth רחב לקליטת לחיצות בצורה אמינה */}
         <Line
           points={flat}
-          stroke="transparent"
-          strokeWidth={Math.max(20, style.width + 14)}
+          stroke={style.color}
+          strokeWidth={style.width + (isSelected ? 3 : 0)}
+          hitStrokeWidth={Math.max(24, style.width + 18)}
+          dash={style.dash}
+          lineCap="round" lineJoin="round"
           onClick={(e) => {
             e.cancelBubble = true;
             if (e.evt.shiftKey) {
@@ -421,14 +425,6 @@ export default function RoomEditor({ classroomId }: Props) {
             setSelectedWallIds(new Set([w.id]));
             setSelectedFixedIds(new Set());
           }}
-        />
-        <Line
-          points={flat}
-          stroke={style.color}
-          strokeWidth={style.width + (isSelected ? 3 : 0)}
-          dash={style.dash}
-          lineCap="round" lineJoin="round"
-          listening={false}
         />
         {isSelected && selectedWallIds.size === 1 && w.points.map((p, i) => (
           <Circle

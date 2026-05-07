@@ -174,7 +174,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const historyDepth = useClassroomStore((s) => (s.currentId ? s._history[s.currentId]?.length ?? 0 : 0));
   const futureDepth  = useClassroomStore((s) => (s.currentId ? s._future[s.currentId]?.length ?? 0 : 0));
 
-  const [template, setTemplate] = useState<TemplateType>('pair');
+  const [template, setTemplate] = useState<TemplateType>('select');
   const [cfg, setCfg] = useState<TemplateConfig>({ count: 5, hGap: 160, vGap: 110, rows: 4, cols: 5 });
   const [gridOn, setGridOn] = useState(true);
   const [showZones, setShowZones] = useState(true);

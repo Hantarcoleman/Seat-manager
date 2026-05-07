@@ -84,16 +84,45 @@ export interface Seat {
 
 // ── תלמידים ──────────────────────────────────────────────
 export type StudentTag =
-  | 'vision_needs_front'   // צריך לשבת קדימה בגלל ראייה
-  | 'adhd_needs_front'     // צריך לשבת קדימה בגלל קשיי קשב
-  | 'tall'                 // גבוה — עדיף בצדדים או מאחור
-  | 'needs_wall'           // צריך קיר (סיוע יציבה / רוגע)
-  | 'quiet'                // שקט
-  | 'talkative'            // דברן
+  | 'needs_front'          // צריך/ה לשבת מקדימה (ראייה / קשב / כל סיבה)
+  | 'can_focus_back'       // יכול/ה להתרכז גם מאחור
+  | 'tall'                 // גבוה/ה — עדיף בצדדים או מאחור
+  | 'needs_wall'           // צריך/ה קיר
+  | 'quiet'                // שקט/ה
+  | 'talkative'            // דברן/ית
   | 'distractible'         // נוטה להסחה
-  | 'independent'          // עצמאי
-  | 'needs_support'        // זקוק לתמיכה
+  | 'better_alone'         // כדאי שישב/תשב לבד
+  | 'needs_support'        // זקוק/ה לתמיכה
   | 'positive_influence';  // השפעה חיובית
+
+// גם הצגה בלשון זכר וגם בלשון נקבה
+export interface TagDef {
+  emoji: string;
+  m: string;        // זכר
+  f: string;        // נקבה
+  neutral: string;  // ניטרלי / כשמין לא ידוע
+}
+
+export const TAG_DEFS: Record<StudentTag, TagDef> = {
+  needs_front:        { emoji: '👓', m: 'צריך לשבת מקדימה',   f: 'צריכה לשבת מקדימה',   neutral: 'צריך/ה לשבת מקדימה' },
+  can_focus_back:     { emoji: '🔚', m: 'יכול להתרכז מאחור',  f: 'יכולה להתרכז מאחור',  neutral: 'יכול/ה להתרכז מאחור' },
+  tall:               { emoji: '📏', m: 'גבוה',                f: 'גבוהה',                neutral: 'גבוה/ה' },
+  needs_wall:         { emoji: '🧱', m: 'צריך קיר',            f: 'צריכה קיר',            neutral: 'צריך/ה קיר' },
+  quiet:              { emoji: '🤫', m: 'שקט',                 f: 'שקטה',                 neutral: 'שקט/ה' },
+  talkative:          { emoji: '💬', m: 'דברן',                f: 'דברנית',               neutral: 'דברן/ית' },
+  distractible:       { emoji: '🌀', m: 'נוטה להסחה',          f: 'נוטה להסחה',           neutral: 'נוטה להסחה' },
+  better_alone:       { emoji: '⭐', m: 'כדאי שישב לבד',       f: 'כדאי שתשב לבד',        neutral: 'כדאי שישב/תשב לבד' },
+  needs_support:      { emoji: '🤝', m: 'זקוק לתמיכה',         f: 'זקוקה לתמיכה',         neutral: 'זקוק/ה לתמיכה' },
+  positive_influence: { emoji: '✨', m: 'השפעה חיובית',         f: 'השפעה חיובית',         neutral: 'השפעה חיובית' },
+};
+
+// מחזיר תווית בעברית עם אימוג'י לפי מין התלמיד
+export function tagLabel(tag: StudentTag, gender?: 'm' | 'f' | undefined, includeEmoji = true): string {
+  const def = TAG_DEFS[tag];
+  if (!def) return tag;
+  const text = gender === 'm' ? def.m : gender === 'f' ? def.f : def.neutral;
+  return includeEmoji ? `${def.emoji} ${text}` : text;
+}
 
 export interface Student {
   id: string;
@@ -104,6 +133,26 @@ export interface Student {
   avoidNear: string[];     // ids של תלמידים שלא מומלץ להושיב לידם / חייבים הפרדה
   responsibilityScore: number; // 0–100, ברירת מחדל 70
   notes?: string;
+  configured?: boolean;    // האם המורה לחץ "שמור" בטופס (= אופיין)
+}
+
+// המרה של תיוגים ישנים לתיוגים החדשים — לתאימות לאחור
+export function migrateStudentTags(tags: string[]): StudentTag[] {
+  const valid: StudentTag[] = [
+    'needs_front', 'can_focus_back', 'tall', 'needs_wall', 'quiet',
+    'talkative', 'distractible', 'better_alone', 'needs_support', 'positive_influence',
+  ];
+  const aliases: Record<string, StudentTag> = {
+    vision_needs_front: 'needs_front',
+    adhd_needs_front:   'needs_front',
+    independent:        'better_alone',
+  };
+  const result = new Set<StudentTag>();
+  for (const t of tags) {
+    if (valid.includes(t as StudentTag)) result.add(t as StudentTag);
+    else if (aliases[t]) result.add(aliases[t]);
+  }
+  return Array.from(result);
 }
 
 // ── כיתה (חדר) ────────────────────────────────────────────

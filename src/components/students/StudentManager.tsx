@@ -1,21 +1,16 @@
 import { useState, useMemo } from 'react';
 import { useStudentsStore } from '../../store/studentsStore';
 import type { Student, StudentTag } from '../../types';
+import { TAG_DEFS, tagLabel } from '../../types';
 import StudentForm from './StudentForm';
 import CsvImport from './CsvImport';
 
-const TAG_LABELS: Record<StudentTag, string> = {
-  vision_needs_front:  '👓 ראייה',
-  adhd_needs_front:    '🎯 קשב',
-  tall:                '📏 גבוה',
-  needs_wall:          '🧱 קיר',
-  quiet:               '🤫 שקט',
-  talkative:           '💬 דברן',
-  distractible:        '🌀 מוסח',
-  independent:         '⭐ עצמאי',
-  needs_support:       '🤝 תמיכה',
-  positive_influence:  '✨ חיובי',
-};
+const ALL_TAGS = Object.keys(TAG_DEFS) as StudentTag[];
+
+// תלמיד "אופיין" אם המורה לחץ "שמור" בטופס שלו (configured=true)
+function isCharacterized(s: Student): boolean {
+  return s.configured === true;
+}
 
 interface Props {
   classroomId: string;
@@ -34,14 +29,20 @@ export default function StudentManager({ classroomId }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<StudentTag | ''>('');
+  const [filterStatus, setFilterStatus] = useState<'all' | 'characterized' | 'pending'>('all');
+
+  const characterizedCount = useMemo(() =>
+    students.filter(isCharacterized).length, [students]);
 
   const filtered = useMemo(() => {
     return students.filter((s) => {
       if (search && !s.name.includes(search)) return false;
       if (filterTag && !s.tags.includes(filterTag)) return false;
+      if (filterStatus === 'characterized' && !isCharacterized(s)) return false;
+      if (filterStatus === 'pending' && isCharacterized(s)) return false;
       return true;
     });
-  }, [students, search, filterTag]);
+  }, [students, search, filterTag, filterStatus]);
 
   const editing = editingId ? students.find((s) => s.id === editingId) : null;
 
@@ -119,7 +120,15 @@ export default function StudentManager({ classroomId }: Props) {
           📥 ייבוא מקובץ
         </button>
         <span style={{ marginRight: 'auto', fontSize: 13, color: 'var(--ink2)' }}>
-          <strong>{students.length}</strong> תלמידים בכיתה
+          <strong>{students.length}</strong> תלמידים ·{' '}
+          <span style={{ color: 'var(--gn)', fontWeight: 700 }}>
+            ✓ {characterizedCount} אופיינו
+          </span>
+          {students.length > characterizedCount && (
+            <span style={{ color: '#ca8a04', fontWeight: 700 }}>
+              {' '}· ⏳ {students.length - characterizedCount} לאפיון
+            </span>
+          )}
         </span>
       </div>
 
@@ -141,6 +150,19 @@ export default function StudentManager({ classroomId }: Props) {
             }}
           />
           <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value as 'all' | 'characterized' | 'pending')}
+            style={{
+              padding: '8px 12px', fontSize: 14,
+              border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+              fontFamily: 'inherit', background: 'var(--sf)',
+            }}
+          >
+            <option value="all">כולם</option>
+            <option value="characterized">✓ אופיינו</option>
+            <option value="pending">⏳ ממתינים לאפיון</option>
+          </select>
+          <select
             value={filterTag}
             onChange={(e) => setFilterTag(e.target.value as StudentTag | '')}
             style={{
@@ -150,9 +172,10 @@ export default function StudentManager({ classroomId }: Props) {
             }}
           >
             <option value="">כל הסיווגים</option>
-            {(Object.keys(TAG_LABELS) as StudentTag[]).map((t) =>
-              <option key={t} value={t}>{TAG_LABELS[t]}</option>
-            )}
+            {ALL_TAGS.map((t) => {
+              const def = TAG_DEFS[t];
+              return <option key={t} value={t}>{def.emoji} {def.neutral}</option>;
+            })}
           </select>
         </div>
       )}
@@ -182,19 +205,30 @@ export default function StudentManager({ classroomId }: Props) {
                              : s.responsibilityScore >= 70 ? '#ca8a04'
                              : s.responsibilityScore >= 40 ? '#0284c7'
                              : '#dc2626';
-            // צבע רקע לפי מין: בנים כחול, בנות ורוד
             const cardBg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg2)';
             const cardBorder = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
             const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+            const characterized = isCharacterized(s);
             return (
               <div
                 key={s.id}
                 style={{
                   background: cardBg, border: `1.5px solid ${cardBorder}`, borderRadius: 'var(--r)',
                   padding: 12, boxShadow: 'var(--sh)', display: 'flex', flexDirection: 'column', gap: 6,
+                  position: 'relative',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                {/* תווית "אופיין" / "ממתין לאפיון" */}
+                <div style={{
+                  position: 'absolute', top: 8, left: 8,
+                  background: characterized ? '#dcfce7' : '#fef3c7',
+                  color: characterized ? '#166534' : '#92400e',
+                  border: `1px solid ${characterized ? '#86efac' : '#fde68a'}`,
+                  fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 8,
+                }}>
+                  {characterized ? '✓ אופיין' : '⏳ לאפיון'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
                   <div style={{ fontWeight: 800, fontSize: 15, flex: 1, color: nameColor }}>
                     {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
                   </div>
@@ -207,13 +241,19 @@ export default function StudentManager({ classroomId }: Props) {
                 </div>
                 {s.tags.length > 0 && (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                    {s.tags.map((t) => (
-                      <span key={t} style={{
-                        fontSize: 10, fontWeight: 600, padding: '2px 6px',
-                        background: 'var(--abg)', color: '#9a3412',
-                        border: '1px solid var(--abd)', borderRadius: 4,
-                      }}>{TAG_LABELS[t]}</span>
-                    ))}
+                    {s.tags.map((t) => {
+                      const def = TAG_DEFS[t as StudentTag];
+                      if (!def) return null;
+                      return (
+                        <span key={t} style={{
+                          fontSize: 10, fontWeight: 600, padding: '2px 6px',
+                          background: 'var(--abg)', color: '#9a3412',
+                          border: '1px solid var(--abd)', borderRadius: 4,
+                        }}>
+                          {tagLabel(t as StudentTag, s.gender)}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 {(s.preferredNear.length > 0 || s.avoidNear.length > 0) && (

@@ -1,6 +1,9 @@
 // בדיקת אילוצים בסידור הושבה - מחזיר התראות לפי כללי הפדגוגיה
 import type { Classroom, Student, SeatingArrangement, ArrangementWarning } from '../types';
 
+// תווית עם פנייה מותאמת מין
+const lui = (s: Student) => s.name; // alias
+
 export function validateAssignments(
   arr: SeatingArrangement,
   classroom: Classroom,
@@ -19,58 +22,70 @@ export function validateAssignments(
     const seat = classroom.seats.find((s) => s.id === seatId);
     if (!seat) continue;
     const zones = new Set([...(seat.autoZones ?? []), ...(seat.manualZones ?? [])]);
+    const f = stu.gender === 'f';
 
-    // גבוה בקדמת הכיתה — מסתיר ראייה לאחרים
+    // גבוה/ה בקדמת הכיתה
     if (stu.tags.includes('tall') && zones.has('front_row')) {
       warnings.push({
         type: 'soft',
-        message: `📏 ${stu.name} (גבוה) יושב בקדמת הכיתה — עלול להסתיר את הראייה. עדיף בצדדים או מאחור.`,
-        studentIds: [stu.id],
-        seatIds: [seat.id],
+        message: f
+          ? `📏 ${lui(stu)} (גבוהה) יושבת בקדמת הכיתה — עלולה להסתיר את הראייה. עדיף בצדדים או מאחור.`
+          : `📏 ${lui(stu)} (גבוה) יושב בקדמת הכיתה — עלול להסתיר את הראייה. עדיף בצדדים או מאחור.`,
+        studentIds: [stu.id], seatIds: [seat.id],
       });
     }
 
-    // מוסח ליד חלון/דלת
+    // נוטה להסחה ליד חלון/דלת
     if (stu.tags.includes('distractible')) {
       if (zones.has('near_window')) {
         warnings.push({
           type: 'soft',
-          message: `🌀 ${stu.name} (נוטה להסחה) יושב ליד חלון`,
+          message: f
+            ? `🌀 ${lui(stu)} (נוטה להסחה) יושבת ליד חלון`
+            : `🌀 ${lui(stu)} (נוטה להסחה) יושב ליד חלון`,
           studentIds: [stu.id], seatIds: [seat.id],
         });
       }
       if (zones.has('near_door')) {
         warnings.push({
           type: 'soft',
-          message: `🌀 ${stu.name} (נוטה להסחה) יושב ליד דלת`,
+          message: f
+            ? `🌀 ${lui(stu)} (נוטה להסחה) יושבת ליד דלת`
+            : `🌀 ${lui(stu)} (נוטה להסחה) יושב ליד דלת`,
           studentIds: [stu.id], seatIds: [seat.id],
         });
       }
     }
 
-    // צריך קיר אך לא יושב ליד קיר
+    // צריך/ה קיר אך לא יושב/ת ליד קיר
     if (stu.tags.includes('needs_wall') && !zones.has('near_wall')) {
       warnings.push({
         type: 'soft',
-        message: `🧱 ${stu.name} (צריך קיר) — לא יושב ליד קיר`,
+        message: f
+          ? `🧱 ${lui(stu)} (צריכה קיר) — לא יושבת ליד קיר`
+          : `🧱 ${lui(stu)} (צריך קיר) — לא יושב ליד קיר`,
         studentIds: [stu.id], seatIds: [seat.id],
       });
     }
 
-    // צריך לשבת קדימה (ראייה) — חזק
-    if (stu.tags.includes('vision_needs_front') && !zones.has('front_row')) {
+    // צריך/ה לשבת מקדימה אך לא יושב/ת בשורה הקדמית
+    if (stu.tags.includes('needs_front') && !zones.has('front_row')) {
       warnings.push({
         type: 'hard',
-        message: `👓 ${stu.name} צריך לשבת קדימה (ראייה) — לא יושב בשורה קדמית!`,
+        message: f
+          ? `👓 ${lui(stu)} צריכה לשבת מקדימה — לא יושבת בשורה קדמית!`
+          : `👓 ${lui(stu)} צריך לשבת מקדימה — לא יושב בשורה קדמית!`,
         studentIds: [stu.id], seatIds: [seat.id],
       });
     }
 
-    // צריך לשבת קדימה (קשב) — רך
-    if (stu.tags.includes('adhd_needs_front') && !zones.has('front_row')) {
+    // המלצה חיובית: "כדאי שישב/תשב לבד" — נשמר כתקין רק אם המושב יחיד (solo)
+    if (stu.tags.includes('better_alone') && seat.side !== 'solo') {
       warnings.push({
         type: 'soft',
-        message: `🎯 ${stu.name} צריך לשבת קדימה (קשב) — לא יושב בשורה קדמית`,
+        message: f
+          ? `⭐ ${lui(stu)} כדאי שתשב לבד — יושבת ליד תלמיד/ה אחר/ת`
+          : `⭐ ${lui(stu)} כדאי שישב לבד — יושב ליד תלמיד/ה אחר/ת`,
         studentIds: [stu.id], seatIds: [seat.id],
       });
     }
@@ -105,7 +120,7 @@ export function validateAssignments(
   return warnings;
 }
 
-// ניקוד כללי: מתחיל ב-100, מוריד נקודות לכל אזהרה
+// ניקוד כללי
 export function scoreArrangement(warnings: ArrangementWarning[]): number {
   let score = 100;
   for (const w of warnings) {

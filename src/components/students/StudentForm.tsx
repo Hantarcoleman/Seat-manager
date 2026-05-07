@@ -1,18 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Student, StudentTag } from '../../types';
+import { TAG_DEFS, tagLabel, migrateStudentTags } from '../../types';
 
-const TAG_LABELS: Record<StudentTag, string> = {
-  vision_needs_front:  '👓 צריך לשבת קדימה (ראייה)',
-  adhd_needs_front:    '🎯 צריך לשבת קדימה (קשב)',
-  tall:                '📏 גבוה',
-  needs_wall:          '🧱 צריך קיר',
-  quiet:               '🤫 שקט',
-  talkative:           '💬 דברן',
-  distractible:        '🌀 נוטה להסחה',
-  independent:         '⭐ עצמאי',
-  needs_support:       '🤝 זקוק לתמיכה',
-  positive_influence:  '✨ השפעה חיובית',
-};
+const ALL_TAGS = Object.keys(TAG_DEFS) as StudentTag[];
 
 interface Props {
   initial?: Partial<Student>;
@@ -187,7 +177,8 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
     if (initial) {
       setName(initial.name ?? '');
       setGender(initial.gender ?? '');
-      setTags(initial.tags ?? []);
+      // המרת תיוגים ישנים לתיוגים החדשים
+      setTags(migrateStudentTags(initial.tags ?? []));
       setResponsibilityScore(initial.responsibilityScore ?? 70);
       setPreferredNear(initial.preferredNear ?? []);
       setAvoidNear(initial.avoidNear ?? []);
@@ -209,6 +200,7 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
       preferredNear,
       avoidNear,
       notes: notes.trim() || undefined,
+      configured: true,
     });
   };
 
@@ -255,8 +247,10 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
       <div style={{ marginBottom: 16 }}>
         <label style={{ display: 'block', fontSize: 13, fontWeight: 700, marginBottom: 4 }}>צרכים ותכונות</label>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {(Object.keys(TAG_LABELS) as StudentTag[]).map((t) => {
+          {ALL_TAGS.map((t) => {
             const on = tags.includes(t);
+            // התווית משתנה לפי המין שנבחר בטופס
+            const label = tagLabel(t, gender === '' ? undefined : gender);
             return (
               <button
                 key={t} type="button" onClick={() => toggleTag(t)}
@@ -268,7 +262,7 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
                   cursor: 'pointer', fontFamily: 'inherit',
                 }}
               >
-                {TAG_LABELS[t]}
+                {label}
               </button>
             );
           })}

@@ -130,5 +130,6 @@ export function importRowsToStudents(rows: ImportRow[]): Omit<Student, 'id'>[] {
     avoidNear: [],
     responsibilityScore: 70,
     notes: undefined,
+    configured: false, // טרם אופיין ע"י המורה
   }));
 }

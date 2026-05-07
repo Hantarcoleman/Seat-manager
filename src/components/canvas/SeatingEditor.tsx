@@ -131,18 +131,66 @@ export default function SeatingEditor({ classroomId }: Props) {
     setPickedStudentId(null);
   };
 
-  // אוטו-שיבוץ פשוט: ממלא תלמידים לא משובצים במושבים פנויים בסדר אקראי
+  // אוטו-שיבוץ: קודם מזווג זוגות שמסומנים הדדית "עובד טוב ליד" באותו שולחן זוגי,
+  // אחר כך ממלא את השאר בסדר אקראי
   const autoFillSimple = () => {
     const emptySeats = classroom.seats.filter((s) => !seatToStudentId.has(s.id));
     if (emptySeats.length === 0 || unassigned.length === 0) return;
-    const shuffled = [...unassigned].sort(() => Math.random() - 0.5);
+
     const next = [...assignments];
-    let i = 0;
-    for (const seat of emptySeats) {
-      if (i >= shuffled.length) break;
-      next.push({ seatId: seat.id, studentId: shuffled[i].id });
-      i++;
+    const remaining = new Set(unassigned.map((s) => s.id));
+
+    // 1. מצא זוגות הדדיים של "עובד טוב ליד"
+    const mutualPairs: Array<[string, string]> = [];
+    for (const a of unassigned) {
+      if (!remaining.has(a.id)) continue;
+      for (const bId of a.preferredNear) {
+        if (!remaining.has(bId) || bId === a.id) continue;
+        const b = unassigned.find((s) => s.id === bId);
+        if (!b) continue;
+        const mutual = b.preferredNear.includes(a.id);
+        const conflict = a.avoidNear.includes(b.id) || b.avoidNear.includes(a.id);
+        if (mutual && !conflict) {
+          mutualPairs.push([a.id, b.id]);
+          remaining.delete(a.id);
+          remaining.delete(b.id);
+          break;
+        }
+      }
     }
+
+    // 2. שולחנות זוגיים שכל המושבים בהם פנויים
+    const usedSeatIds = new Set(next.map((a) => a.seatId));
+    const emptyPairDesks: Array<{ seats: typeof classroom.seats }> = [];
+    for (const d of classroom.desks) {
+      if (d.seatCount !== 2) continue;
+      const seats = classroom.seats.filter((s) => s.deskId === d.id && !usedSeatIds.has(s.id));
+      if (seats.length === 2) emptyPairDesks.push({ seats });
+    }
+
+    // 3. שלח זוגות הדדיים לשולחנות זוגיים פנויים
+    for (const [aId, bId] of mutualPairs) {
+      const desk = emptyPairDesks.shift();
+      if (!desk) {
+        // אין יותר שולחנות זוגיים פנויים — נחזיר אותם לשאר
+        remaining.add(aId);
+        remaining.add(bId);
+        continue;
+      }
+      next.push({ seatId: desk.seats[0].id, studentId: aId });
+      next.push({ seatId: desk.seats[1].id, studentId: bId });
+      usedSeatIds.add(desk.seats[0].id);
+      usedSeatIds.add(desk.seats[1].id);
+    }
+
+    // 4. ממלא את השאר אקראית
+    const remainingSeats = classroom.seats.filter((s) => !usedSeatIds.has(s.id));
+    const remainingStudents = unassigned.filter((s) => remaining.has(s.id));
+    const shuffled = [...remainingStudents].sort(() => Math.random() - 0.5);
+    for (let i = 0; i < shuffled.length && i < remainingSeats.length; i++) {
+      next.push({ seatId: remainingSeats[i].id, studentId: shuffled[i].id });
+    }
+
     updateAssignments(classroomId, next);
   };
 
@@ -178,9 +226,11 @@ export default function SeatingEditor({ classroomId }: Props) {
     const w = desk.seatCount === 2 ? 130 : 80;
     const h = 70;
     return (
-      <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation} listening={false}>
+      <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation}>
+        {/* גוף השולחן — לא מאזין לאירועים, רק תצוגה */}
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
-              fill="#e7e5e4" stroke="#78716c" strokeWidth={1.5} cornerRadius={6} />
+              fill="#e7e5e4" stroke="#78716c" strokeWidth={1.5} cornerRadius={6}
+              listening={false} />
         {seats.map((seat) => renderSeat(seat))}
       </Group>
     );
