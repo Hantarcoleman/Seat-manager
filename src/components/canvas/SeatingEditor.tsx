@@ -709,7 +709,7 @@ export default function SeatingEditor({ classroomId }: Props) {
           <div
             onClick={onParkingDrop}
             style={{
-              marginTop: classroom.height + 90,
+              marginTop: 90,
               background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
               border: pickedStudentId && studentToSeatId.has(pickedStudentId)
                 ? '2px dashed var(--ac)' : '1px solid var(--bd)',
