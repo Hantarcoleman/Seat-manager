@@ -42,12 +42,21 @@ export function getPlacementExplanation(
   const reasons: PlacementReason[] = [];
   const f = student.gender === 'f';
 
-  if (student.tags.includes('needs_front')) {
+  if (student.tags.includes('needs_very_front')) {
     const ok = zones.has('front_row');
     reasons.push({
-      tag: '👓 צריך/ה לשבת מקדימה',
+      tag: '🔴 חייב/ת שורה קדמית ביותר',
       satisfied: ok,
-      note: ok ? 'יושב/ת בשורה קדמית ✓' : 'לא בשורה קדמית ✗',
+      note: ok ? 'יושב/ת בשורה הקדמית ביותר ✓' : 'לא בשורה הקדמית ביותר ✗',
+    });
+  }
+
+  if (student.tags.includes('needs_front')) {
+    const ok = zones.has('front_row') || zones.has('second_row');
+    reasons.push({
+      tag: '👓 חייב/ת אחת משתי שורות קדמיות',
+      satisfied: ok,
+      note: ok ? 'יושב/ת בשורה קדמית ✓' : 'לא בשתי השורות הקדמיות ✗',
     });
   }
 

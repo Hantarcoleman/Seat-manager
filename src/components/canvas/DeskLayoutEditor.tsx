@@ -15,7 +15,8 @@ const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[
 };
 
 const ZONE_LABELS: Record<ZoneTag, { label: string; color: string }> = {
-  front_row:   { label: 'קדמי', color: '#7c3aed' },
+  front_row:   { label: 'קדמי ביותר', color: '#7c3aed' },
+  second_row:  { label: 'שורה 2', color: '#9333ea' },
   back_row:    { label: 'אחורי', color: '#1e40af' },
   side_column: { label: 'צד', color: '#92400e' },
   center:      { label: 'מרכז', color: '#475569' },

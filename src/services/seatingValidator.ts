@@ -69,13 +69,24 @@ export function validateAssignments(
       });
     }
 
-    // צריך/ה לשבת מקדימה אך לא יושב/ת בשורה הקדמית
-    if (stu.tags.includes('needs_front') && !zones.has('front_row')) {
+    // חייב/ת שורה קדמית ביותר — רק שורה 1
+    if (stu.tags.includes('needs_very_front') && !zones.has('front_row')) {
       warnings.push({
         type: 'hard',
         message: f
-          ? `👓 ${lui(stu)} צריכה לשבת מקדימה — לא יושבת בשורה קדמית!`
-          : `👓 ${lui(stu)} צריך לשבת מקדימה — לא יושב בשורה קדמית!`,
+          ? `🔴 ${lui(stu)} חייבת לשבת בשורה הקדמית ביותר — לא יושבת שם!`
+          : `🔴 ${lui(stu)} חייב לשבת בשורה הקדמית ביותר — לא יושב שם!`,
+        studentIds: [stu.id], seatIds: [seat.id],
+      });
+    }
+
+    // חייב/ת אחת משתי השורות הקדמיות — שורה 1 או 2
+    if (stu.tags.includes('needs_front') && !zones.has('front_row') && !zones.has('second_row')) {
+      warnings.push({
+        type: 'hard',
+        message: f
+          ? `👓 ${lui(stu)} חייבת לשבת באחת משתי השורות הקדמיות — לא יושבת שם!`
+          : `👓 ${lui(stu)} חייב לשבת באחת משתי השורות הקדמיות — לא יושב שם!`,
         studentIds: [stu.id], seatIds: [seat.id],
       });
     }
@@ -113,6 +124,22 @@ export function validateAssignments(
       warnings.push({
         type: 'soft',
         message: `💬 שני דברנים יושבים יחד: ${a.name} ו-${b.name}`,
+        studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
+      });
+    }
+
+    // הגנה על אזור שקט: תלמיד/ה עם 100% אחריות ליד דברן/ית
+    if (a.responsibilityScore >= 100 && b.tags.includes('talkative')) {
+      warnings.push({
+        type: 'soft',
+        message: `✨ ${a.name} (100% אחריות) יושב/ת ליד ${b.name} (דברן/ית)`,
+        studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
+      });
+    }
+    if (b.responsibilityScore >= 100 && a.tags.includes('talkative')) {
+      warnings.push({
+        type: 'soft',
+        message: `✨ ${b.name} (100% אחריות) יושב/ת ליד ${a.name} (דברן/ית)`,
         studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
       });
     }

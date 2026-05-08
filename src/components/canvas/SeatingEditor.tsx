@@ -176,7 +176,8 @@ export default function SeatingEditor({ classroomId }: Props) {
         if (n?.avoidNear.includes(stu.id)) { bad = true; break; }
       }
 
-      if (stu.tags.includes('needs_front')) { if (zones.has('front_row')) good = true; else bad = true; }
+      if (stu.tags.includes('needs_very_front')) { if (zones.has('front_row')) good = true; else bad = true; }
+      if (stu.tags.includes('needs_front')) { if (zones.has('front_row') || zones.has('second_row')) good = true; else bad = true; }
       if (stu.tags.includes('needs_wall') && zones.has('near_wall')) good = true;
       if (stu.tags.includes('distractible') && (zones.has('near_window') || zones.has('near_door'))) bad = true;
       if (stu.tags.includes('better_alone') && seat.side === 'solo') good = true;
@@ -704,6 +705,63 @@ export default function SeatingEditor({ classroomId }: Props) {
 
         {/* ── עמודה ימנית ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* אזור המתנה — ראשון בעמודה, בקו עם ראש הקנבס */}
+          <div
+            onClick={onParkingDrop}
+            style={{
+              background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
+              border: pickedStudentId && studentToSeatId.has(pickedStudentId)
+                ? '2px dashed var(--ac)' : '1px solid var(--bd)',
+              borderRadius: 'var(--r)', padding: 12, boxShadow: 'var(--sh)',
+              cursor: pickedStudentId && studentToSeatId.has(pickedStudentId) ? 'pointer' : 'default',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>
+              ⏳ אזור המתנה ({unassigned.length})
+            </div>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => { e.stopPropagation(); setSearch(e.target.value); }}
+              onClick={(e) => e.stopPropagation()}
+              placeholder="🔍 חיפוש..."
+              style={{
+                width: '100%', padding: '6px 10px', fontSize: 13,
+                border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
+                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 8,
+              }}
+            />
+            <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {filteredUnassigned.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 12 }}>
+                  {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
+                </div>
+              ) : filteredUnassigned.map((s) => {
+                const isP = pickedStudentId === s.id;
+                const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
+                const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+                return (
+                  <button
+                    key={s.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
+                    onDragEnd={() => setDraggedStudentId(null)}
+                    onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
+                    style={{
+                      background: isP ? '#fff7ed' : bg,
+                      color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                      borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
+                      cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
+                    }}
+                  >
+                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* הצעות AI */}
           {aiProposals.length > 0 && (
             <div style={{
@@ -783,65 +841,6 @@ export default function SeatingEditor({ classroomId }: Props) {
               )}
             </div>
           )}
-
-          {/* אזור המתנה */}
-          <div
-            onClick={onParkingDrop}
-            style={{
-              background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
-              border: pickedStudentId && studentToSeatId.has(pickedStudentId)
-                ? '2px dashed var(--ac)' : '1px solid var(--bd)',
-              borderRadius: 'var(--r)', padding: 12, boxShadow: 'var(--sh)',
-              cursor: pickedStudentId && studentToSeatId.has(pickedStudentId) ? 'pointer' : 'default',
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>
-              ⏳ אזור המתנה ({unassigned.length})
-            </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => { e.stopPropagation(); setSearch(e.target.value); }}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="🔍 חיפוש..."
-              style={{
-                width: '100%', padding: '6px 10px', fontSize: 13,
-                border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
-                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 8,
-              }}
-            />
-            <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {filteredUnassigned.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 12 }}>
-                  {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
-                </div>
-              ) : filteredUnassigned.map((s) => {
-                const isP = pickedStudentId === s.id;
-                const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
-                const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
-                const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
-                return (
-                  <button
-                    key={s.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
-                    onDragEnd={() => setDraggedStudentId(null)}
-                    onMouseEnter={() => setHoveredStudentId(s.id)}
-                    onMouseLeave={() => setHoveredStudentId(null)}
-                    onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
-                    style={{
-                      background: isP ? '#fff7ed' : bg,
-                      color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
-                      borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
-                      cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
-                    }}
-                  >
-                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
 
           {/* אזהרות */}
           <div style={{

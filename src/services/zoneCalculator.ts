@@ -75,11 +75,14 @@ export function classifyFrontBack(
   dists.sort((a, b) => a.d - b.d);
   const n = dists.length;
   if (n === 0) return result;
-  const frontCount = Math.max(1, Math.floor(n / 3));
-  const backStart = Math.max(frontCount, n - frontCount);
+  // שורה קדמית ביותר = רבע ראשון, שורה שנייה = רבע שני, שורה אחורית = שליש אחרון
+  const frontCount = Math.max(1, Math.floor(n / 4));
+  const secondCount = Math.max(1, Math.floor(n / 4));
+  const backStart = Math.max(frontCount + secondCount, n - Math.floor(n / 3));
 
   dists.forEach((entry, i) => {
     if (i < frontCount) result[entry.seatId] = ['front_row'];
+    else if (i < frontCount + secondCount) result[entry.seatId] = ['second_row'];
     else if (i >= backStart) result[entry.seatId] = ['back_row'];
     else result[entry.seatId] = [];
   });

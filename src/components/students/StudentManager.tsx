@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useStudentsStore } from '../../store/studentsStore';
 import type { Student, StudentTag } from '../../types';
-import { TAG_DEFS, tagLabel } from '../../types';
+import { TAG_DEFS, tagLabel, getConflictingTag } from '../../types';
 import StudentForm from './StudentForm';
 import CsvImport from './CsvImport';
 
@@ -52,14 +52,31 @@ export default function StudentManager({ classroomId }: Props) {
 
   const editing = editingId ? students.find((s) => s.id === editingId) : null;
 
-  // הוספת/הסרת מאפיין לתלמיד — שמירה מיידית
+  // הוספת/הסרת מאפיין לתלמיד — שמירה מיידית, עם בדיקת סתירה
   const toggleTagForStudent = (studentId: string, tag: StudentTag) => {
     const stu = students.find((s) => s.id === studentId);
     if (!stu) return;
-    const newTags = stu.tags.includes(tag)
-      ? stu.tags.filter((t) => t !== tag)
-      : [...stu.tags, tag];
-    updateStudent(classroomId, studentId, { tags: newTags, configured: true });
+    if (stu.tags.includes(tag)) {
+      updateStudent(classroomId, studentId, { tags: stu.tags.filter((t) => t !== tag), configured: true });
+      return;
+    }
+    const conflict = getConflictingTag(tag);
+    if (conflict && stu.tags.includes(conflict)) {
+      const ok = confirm(
+        `המאפיין "${TAG_DEFS[tag].emoji} ${TAG_DEFS[tag].neutral}" סותר את "${TAG_DEFS[conflict].emoji} ${TAG_DEFS[conflict].neutral}".\nלא ניתן לסמן את שניהם — להחליף?`
+      );
+      if (!ok) return;
+      updateStudent(classroomId, studentId, { tags: [...stu.tags.filter((t) => t !== conflict), tag], configured: true });
+      return;
+    }
+    updateStudent(classroomId, studentId, { tags: [...stu.tags, tag], configured: true });
+  };
+
+  // הסרת מאפיין סותר — מחזיר את התלמיד לרשימה הראשית
+  const removeConflictTag = (studentId: string, conflictTag: StudentTag) => {
+    const stu = students.find((s) => s.id === studentId);
+    if (!stu) return;
+    updateStudent(classroomId, studentId, { tags: stu.tags.filter((t) => t !== conflictTag), configured: true });
   };
 
   const onSaveNew = (data: Omit<Student, 'id'>) => { addStudent(classroomId, data); setMode('list'); };
@@ -93,10 +110,21 @@ export default function StudentManager({ classroomId }: Props) {
 
   // ── מצב סימון לפי מאפיין ──
   if (tagMode) {
-    const studentsWithTag = students.filter((s) => s.tags.includes(tagMode));
-    const studentsWithout = students.filter((s) => !s.tags.includes(tagMode));
-    // מיין: עם המאפיין קודם, ואז סנן לפי חיפוש שם
-    const sorted = [...studentsWithTag, ...studentsWithout]
+    const conflictTag = getConflictingTag(tagMode);
+    // תלמידים עם מאפיין סותר — מוצגים בנפרד
+    const conflictStudents = conflictTag
+      ? students.filter((s) => s.tags.includes(conflictTag))
+      : [];
+    // רשימה ראשית — ללא בעלי המאפיין הסותר
+    const mainStudents = students.filter((s) => !conflictTag || !s.tags.includes(conflictTag));
+
+    // מיין: עם המאפיין הנוכחי קודם, ואז סנן לפי חיפוש שם
+    const sorted = [
+      ...mainStudents.filter((s) => s.tags.includes(tagMode)),
+      ...mainStudents.filter((s) => !s.tags.includes(tagMode)),
+    ].filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
+
+    const filteredConflict = conflictStudents
       .filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
 
     return (
@@ -190,6 +218,61 @@ export default function StudentManager({ classroomId }: Props) {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* תלמידים עם מאפיין סותר */}
+        {filteredConflict.length > 0 && conflictTag && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{
+              background: '#fef3c7', border: '1.5px solid #fde68a', borderRadius: 'var(--rs)',
+              padding: '8px 14px', marginBottom: 8,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ fontSize: 16 }}>⚠</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 800, fontSize: 13, color: '#92400e' }}>
+                  {filteredConflict.length} תלמידים עם מאפיין סותר —{' '}
+                  {TAG_DEFS[conflictTag].emoji} {TAG_DEFS[conflictTag].neutral}
+                </span>
+                <div style={{ fontSize: 11, color: '#a16207', marginTop: 2 }}>
+                  לחץ על תלמיד לבטל את המאפיין הסותר ולהחזיר/ו לרשימה
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+              {filteredConflict.map((s) => {
+                const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => removeConflictTag(s.id, conflictTag)}
+                    title={`בטל "${TAG_DEFS[conflictTag].neutral}" כדי להוסיף/ה לרשימה`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      background: '#fefce8', border: '2px solid #fde047',
+                      borderRadius: 'var(--r)', padding: '10px 14px',
+                      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'right',
+                    }}
+                  >
+                    <span style={{
+                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      background: '#fde047', border: '2px solid #ca8a04',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, color: '#713f12', fontWeight: 800,
+                    }}>✕</span>
+                    <div style={{ flex: 1, textAlign: 'right' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: nameColor }}>
+                        {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#a16207', marginTop: 1 }}>
+                        {TAG_DEFS[conflictTag].emoji} {TAG_DEFS[conflictTag].neutral}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 

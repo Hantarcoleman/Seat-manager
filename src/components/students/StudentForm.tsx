@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import type { Student, StudentTag } from '../../types';
-import { TAG_DEFS, tagLabel, migrateStudentTags } from '../../types';
+import { TAG_DEFS, tagLabel, migrateStudentTags, getConflictingTag } from '../../types';
 
 const ALL_TAGS = Object.keys(TAG_DEFS) as StudentTag[];
 
@@ -187,7 +187,18 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
   }, [initial]);
 
   const toggleTag = (t: StudentTag) => {
-    setTags((cur) => cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]);
+    setTags((cur) => {
+      if (cur.includes(t)) return cur.filter((x) => x !== t);
+      const conflict = getConflictingTag(t);
+      if (conflict && cur.includes(conflict)) {
+        const ok = confirm(
+          `המאפיין "${TAG_DEFS[t].emoji} ${TAG_DEFS[t].neutral}" סותר את "${TAG_DEFS[conflict].emoji} ${TAG_DEFS[conflict].neutral}".\nלא ניתן לסמן את שניהם יחד — להחליף?`
+        );
+        if (!ok) return cur;
+        return [...cur.filter((x) => x !== conflict), t];
+      }
+      return [...cur, t];
+    });
   };
 
   const submit = () => {

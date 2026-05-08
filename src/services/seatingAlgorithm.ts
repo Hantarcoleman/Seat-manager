@@ -94,13 +94,32 @@ function buildCandidate(
 
   const zones = (seat: Seat) => new Set([...(seat.autoZones ?? []), ...(seat.manualZones ?? [])]);
 
-  // ── שלב 1: תלמידים עם needs_front → מושבים קדמיים ──
-  const needsFront = shuffle(students.filter((s) => s.tags.includes('needs_front')), rng);
-  const frontSeats = shuffle(seats.filter((s) => zones(s).has('front_row')), rng);
+  // ── שלב 1א: needs_very_front → שורה קדמית ביותר בלבד ──
+  const needsVeryFront = shuffle(students.filter((s) => s.tags.includes('needs_very_front')), rng);
+  const veryFrontSeats = shuffle(seats.filter((s) => zones(s).has('front_row')), rng);
+  let vfIdx = 0;
+  for (const stu of needsVeryFront) {
+    while (vfIdx < veryFrontSeats.length && usedSeatIds.has(veryFrontSeats[vfIdx].id)) vfIdx++;
+    // fallback: שורה שנייה → אחר כך כל מושב, אבל כן מסמנים אזהרה
+    const seat = veryFrontSeats[vfIdx]
+      ?? freeSeat((s) => zones(s).has('second_row'))
+      ?? freeSeat();
+    if (seat) assign(seat.id, stu.id);
+  }
+
+  // ── שלב 1ב: needs_front → שורה 1 או 2 ──
+  const needsFront = shuffle(
+    students.filter((s) => s.tags.includes('needs_front') && !usedStudentIds.has(s.id)),
+    rng
+  );
+  const frontTwoSeats = shuffle(
+    seats.filter((s) => !usedSeatIds.has(s.id) && (zones(s).has('front_row') || zones(s).has('second_row'))),
+    rng
+  );
   let frontIdx = 0;
   for (const stu of needsFront) {
-    while (frontIdx < frontSeats.length && usedSeatIds.has(frontSeats[frontIdx].id)) frontIdx++;
-    const seat = frontSeats[frontIdx] ?? freeSeat(); // fallback לכל מושב
+    while (frontIdx < frontTwoSeats.length && usedSeatIds.has(frontTwoSeats[frontIdx].id)) frontIdx++;
+    const seat = frontTwoSeats[frontIdx] ?? freeSeat();
     if (seat) assign(seat.id, stu.id);
   }
 

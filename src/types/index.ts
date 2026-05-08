@@ -56,7 +56,8 @@ export type LayoutTemplate =
   | 'u_shape';    // צורת U
 
 export type ZoneTag =
-  | 'front_row'    // שורה קדמית (קרוב ללוח)
+  | 'front_row'    // שורה קדמית ביותר (קרוב ללוח)
+  | 'second_row'   // שורה שנייה מהקדמה
   | 'back_row'     // שורה אחורית
   | 'side_column'  // טור צד
   | 'center'       // מרכז
@@ -84,7 +85,8 @@ export interface Seat {
 
 // ── תלמידים ──────────────────────────────────────────────
 export type StudentTag =
-  | 'needs_front'          // צריך/ה לשבת מקדימה (ראייה / קשב / כל סיבה)
+  | 'needs_very_front'     // חייב/ת לשבת בשורה הקדמית ביותר (שורה 1 בלבד)
+  | 'needs_front'          // צריך/ה לשבת באחת משתי השורות הקדמיות
   | 'can_focus_back'       // יכול/ה להתרכז גם מאחור
   | 'tall'                 // גבוה/ה — עדיף בצדדים או מאחור
   | 'needs_wall'           // צריך/ה קיר
@@ -104,7 +106,8 @@ export interface TagDef {
 }
 
 export const TAG_DEFS: Record<StudentTag, TagDef> = {
-  needs_front:        { emoji: '👓', m: 'צריך לשבת מקדימה',   f: 'צריכה לשבת מקדימה',   neutral: 'צריך/ה לשבת מקדימה' },
+  needs_very_front:   { emoji: '🔴', m: 'חייב שורה קדמית ביותר', f: 'חייבת שורה קדמית ביותר', neutral: 'חייב/ת שורה קדמית ביותר' },
+  needs_front:        { emoji: '👓', m: 'חייב אחת משתי שורות קדמיות', f: 'חייבת אחת משתי שורות קדמיות', neutral: 'חייב/ת אחת משתי שורות קדמיות' },
   can_focus_back:     { emoji: '🔚', m: 'יכול להתרכז מאחור',  f: 'יכולה להתרכז מאחור',  neutral: 'יכול/ה להתרכז מאחור' },
   tall:               { emoji: '📏', m: 'גבוה',                f: 'גבוהה',                neutral: 'גבוה/ה' },
   needs_wall:         { emoji: '🧱', m: 'צריך קיר',            f: 'צריכה קיר',            neutral: 'צריך/ה קיר' },
@@ -115,6 +118,21 @@ export const TAG_DEFS: Record<StudentTag, TagDef> = {
   needs_support:      { emoji: '🤝', m: 'זקוק לתמיכה',         f: 'זקוקה לתמיכה',         neutral: 'זקוק/ה לתמיכה' },
   positive_influence: { emoji: '✨', m: 'השפעה חיובית',         f: 'השפעה חיובית',         neutral: 'השפעה חיובית' },
 };
+
+// זוגות מאפיינים סותרים — לא ניתן לסמן שניהם יחד
+export const CONFLICTING_TAG_PAIRS: [StudentTag, StudentTag][] = [
+  ['needs_very_front', 'can_focus_back'],
+  ['needs_very_front', 'needs_front'],
+  ['needs_front', 'can_focus_back'],
+];
+
+export function getConflictingTag(tag: StudentTag): StudentTag | null {
+  for (const [a, b] of CONFLICTING_TAG_PAIRS) {
+    if (tag === a) return b;
+    if (tag === b) return a;
+  }
+  return null;
+}
 
 // מחזיר תווית בעברית עם אימוג'י לפי מין התלמיד
 export function tagLabel(tag: StudentTag, gender?: 'm' | 'f' | undefined, includeEmoji = true): string {
@@ -139,7 +157,7 @@ export interface Student {
 // המרה של תיוגים ישנים לתיוגים החדשים — לתאימות לאחור
 export function migrateStudentTags(tags: string[]): StudentTag[] {
   const valid: StudentTag[] = [
-    'needs_front', 'can_focus_back', 'tall', 'needs_wall', 'quiet',
+    'needs_very_front', 'needs_front', 'can_focus_back', 'tall', 'needs_wall', 'quiet',
     'talkative', 'distractible', 'better_alone', 'needs_support', 'positive_influence',
   ];
   const aliases: Record<string, StudentTag> = {
