@@ -8,6 +8,7 @@ interface StudentsState {
   // map by classroomId → תלמידים בכיתה זו
   byClassroom: Record<string, Student[]>;
 
+  hydrateStudents: (byClassroom: Record<string, Student[]>) => void;
   add: (classroomId: string, student: Omit<Student, 'id'>) => string;
   update: (classroomId: string, id: string, patch: Partial<Student>) => void;
   remove: (classroomId: string, id: string) => void;
@@ -20,6 +21,9 @@ export const useStudentsStore = create<StudentsState>()(
   persist(
     (set, getState) => ({
       byClassroom: {},
+
+      hydrateStudents: (incoming) =>
+        set((s) => ({ byClassroom: { ...incoming, ...s.byClassroom } })),
 
       add: (classroomId, student) => {
         const id = uid();

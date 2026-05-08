@@ -4,9 +4,13 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import { useStudentsStore } from '../../store/studentsStore';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { useAuthStore } from '../../store/authStore';
 import { validateAssignments, scoreArrangement } from '../../services/seatingValidator';
 import { generateSeatingArrangement } from '../../services/seatingAlgorithm';
-import type { Wall, FixedElement, Desk, Seat, ArrangementWarning } from '../../types';
+import { exportSeatsPdf } from '../../services/pdfExportService';
+import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncService';
+import { isSupabaseEnabled } from '../../services/supabaseClient';
+import type { Wall, FixedElement, Desk, Seat, ArrangementWarning, SeatingArrangement } from '../../types';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -33,7 +37,21 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [generating, setGenerating] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [cloudHistory, setCloudHistory] = useState<import('../../services/cloudSyncService').HistoryEntry[]>([]);
   const stageRef = useRef<Konva.Stage>(null);
+
+  const user = useAuthStore((s) => s.user);
+  const listForClassroom = useArrangementStore((s) => s.listForClassroom);
+  const saveCurrent = useArrangementStore((s) => s.saveCurrent);
+  const restore = useArrangementStore((s) => s.restore);
+  const localHistory = useMemo(() => listForClassroom(classroomId), [listForClassroom, classroomId, working]);
+
+  // טעינת היסטוריה מהענן כשמציגים אותה
+  useEffect(() => {
+    if (!showHistory || !isSupabaseEnabled() || !user) return;
+    loadHistory(classroomId).then(setCloudHistory);
+  }, [showHistory, classroomId, user]);
 
   // יוצר working אם לא קיים
   useEffect(() => {
@@ -195,6 +213,35 @@ export default function SeatingEditor({ classroomId }: Props) {
     }, 30);
   };
 
+  // ייצוא PDF — לוכד את הקנבס ומוסיף כותרת
+  const exportPdf = () => {
+    if (!stageRef.current || !classroom) return;
+    exportSeatsPdf(stageRef.current, {
+      classroomName: classroom.name,
+      teacherName: user?.user_metadata?.full_name ?? user?.email,
+      title: `סידור ישיבה — ${classroom.name}`,
+    });
+  };
+
+  // שמירת סידור עם שם + העלאה להיסטוריה בענן
+  const saveArrangement = async () => {
+    if (!working) return;
+    const name = prompt('שם לסידור (לדוגמה: "שבוע א\'")', `סידור ${new Date().toLocaleDateString('he-IL')}`);
+    if (!name) return;
+    const id = saveCurrent(classroomId, name);
+    if (id && isSupabaseEnabled() && user && classroom) {
+      const arr = useArrangementStore.getState().saved[id];
+      if (arr) await saveArrangementHistory(arr, classroom.name);
+    }
+  };
+
+  // שחזור סידור מהיסטוריה
+  const restoreFromHistory = (arr: SeatingArrangement) => {
+    updateAssignments(classroomId, arr.assignments);
+    setPickedStudentId(null);
+    setShowHistory(false);
+  };
+
   // ── רינדור ────────────────────────────────────
   const renderWall = (w: Wall) => {
     const style = WALL_STYLES[w.type] ?? WALL_STYLES.blank;
@@ -349,6 +396,30 @@ export default function SeatingEditor({ classroomId }: Props) {
               {generating ? '⏳ מחשב...' : '✨ צור סידור AI'}
             </button>
             <button
+              onClick={saveArrangement}
+              disabled={!working || assignments.length === 0}
+              style={{
+                background: 'var(--bg2)', color: 'var(--ink)', border: '1.5px solid var(--bd)',
+                borderRadius: 'var(--rs)', padding: '8px 16px', fontWeight: 700, fontSize: 13,
+                cursor: assignments.length > 0 ? 'pointer' : 'not-allowed',
+                opacity: assignments.length > 0 ? 1 : 0.5, fontFamily: 'inherit',
+              }}
+            >
+              💾 שמור
+            </button>
+            <button
+              onClick={exportPdf}
+              disabled={assignments.length === 0}
+              style={{
+                background: 'var(--bg2)', color: 'var(--ink)', border: '1.5px solid var(--bd)',
+                borderRadius: 'var(--rs)', padding: '8px 16px', fontWeight: 700, fontSize: 13,
+                cursor: assignments.length > 0 ? 'pointer' : 'not-allowed',
+                opacity: assignments.length > 0 ? 1 : 0.5, fontFamily: 'inherit',
+              }}
+            >
+              📄 PDF
+            </button>
+            <button
               onClick={clearAllAssignments}
               disabled={assignments.length === 0}
               style={{
@@ -468,7 +539,7 @@ export default function SeatingEditor({ classroomId }: Props) {
                 ✓ אין התראות. הסידור מאוזן.
               </div>
             ) : (
-              <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ maxHeight: 220, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {warnings.map((w, i) => (
                   <div key={i} style={{
                     background: w.type === 'hard' ? '#fef2f2' : '#fffbeb',
@@ -482,9 +553,96 @@ export default function SeatingEditor({ classroomId }: Props) {
               </div>
             )}
           </div>
+
+          {/* היסטוריה */}
+          <div style={{
+            background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+            padding: 12, boxShadow: 'var(--sh)',
+          }}>
+            <button
+              onClick={() => setShowHistory((v) => !v)}
+              style={{
+                width: '100%', background: 'none', border: 'none', padding: 0,
+                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+            >
+              <span style={{ fontSize: 14, fontWeight: 800 }}>
+                📅 היסטוריה ({localHistory.length})
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--ink3)' }}>{showHistory ? '▲' : '▼'}</span>
+            </button>
+
+            {showHistory && (
+              <div style={{ marginTop: 10 }}>
+                {/* היסטוריה מקומית */}
+                {localHistory.length === 0 && cloudHistory.length === 0 ? (
+                  <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 8 }}>
+                    אין סידורים שמורים עדיין
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflow: 'auto' }}>
+                    {/* סידורים שמורים מקומית */}
+                    {localHistory.map((arr) => (
+                      <HistoryItem
+                        key={arr.id}
+                        name={arr.name}
+                        date={arr.createdAt}
+                        onRestore={() => { restore(arr.id); setShowHistory(false); setPickedStudentId(null); }}
+                      />
+                    ))}
+                    {/* סידורים מהענן שאינם בהיסטוריה המקומית */}
+                    {cloudHistory
+                      .filter((ch) => !localHistory.find((lh) => lh.id === ch.id))
+                      .map((ch) => (
+                        <HistoryItem
+                          key={ch.id}
+                          name={ch.name || ch.classroomName}
+                          date={ch.createdAt}
+                          cloud
+                          onRestore={() => restoreFromHistory(ch.data)}
+                        />
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
+    </div>
+  );
+}
+
+function HistoryItem({ name, date, onRestore, cloud }: {
+  name: string; date: string; onRestore: () => void; cloud?: boolean;
+}) {
+  const d = new Date(date);
+  const dateStr = d.toLocaleDateString('he-IL', { day: 'numeric', month: 'short', year: 'numeric' });
+  const timeStr = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 8,
+      background: 'var(--bg)', border: '1px solid var(--bd)',
+      borderRadius: 'var(--rs)', padding: '7px 10px',
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {cloud ? '☁ ' : ''}{name || 'סידור ללא שם'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{dateStr} · {timeStr}</div>
+      </div>
+      <button
+        onClick={onRestore}
+        style={{
+          background: 'var(--ac)', color: '#fff', border: 'none',
+          borderRadius: 'var(--rs)', padding: '4px 10px',
+          fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', whiteSpace: 'nowrap',
+        }}
+      >
+        שחזר
+      </button>
     </div>
   );
 }

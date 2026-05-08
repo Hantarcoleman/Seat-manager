@@ -18,6 +18,7 @@ interface ArrangementState {
   togglePin: (classroomId: string, studentId: string) => void;
   clearPins: (classroomId: string) => void;
 
+  hydrateSaved: (saved: Record<string, SeatingArrangement>) => void;
   // ── שמירה / שחזור ──
   saveCurrent: (classroomId: string, name: string) => string | null;
   restore: (id: string) => void;
@@ -84,6 +85,9 @@ export const useArrangementStore = create<ArrangementState>()(
 
       clearPins: (classroomId) =>
         set((s) => ({ pinnedByClassroom: { ...s.pinnedByClassroom, [classroomId]: [] } })),
+
+      hydrateSaved: (incoming) =>
+        set((s) => ({ saved: { ...incoming, ...s.saved } })),
 
       saveCurrent: (classroomId, name) => {
         const cur = get().workingByClassroom[classroomId];

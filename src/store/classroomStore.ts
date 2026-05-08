@@ -35,6 +35,7 @@ interface ClassroomState {
   removeDesk: (id: string) => void;
   updateSeat: (id: string, patch: Partial<Seat>) => void;
 
+  hydrateClassrooms: (classrooms: Record<string, Classroom>) => void;
   // ── ניקוי כללי ──
   clearAll: () => void;
 
@@ -172,6 +173,9 @@ export const useClassroomStore = create<ClassroomState>()(
           ...c,
           seats: c.seats.map((seat) => (seat.id === id ? { ...seat, ...patch } : seat)),
         }))),
+
+      hydrateClassrooms: (classrooms) =>
+        set((s) => ({ classrooms: { ...classrooms, ...s.classrooms } })),
 
       // ── ניקוי כללי ──
       clearAll: () =>
