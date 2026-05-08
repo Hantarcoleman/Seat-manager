@@ -5,6 +5,7 @@ import { useClassroomStore } from '../../store/classroomStore';
 import { useStudentsStore } from '../../store/studentsStore';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { validateAssignments, scoreArrangement } from '../../services/seatingValidator';
+import { generateSeatingArrangement } from '../../services/seatingAlgorithm';
 import type { Wall, FixedElement, Desk, Seat, ArrangementWarning } from '../../types';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -27,6 +28,7 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [generating, setGenerating] = useState(false);
   const stageRef = useRef<Konva.Stage>(null);
 
   // יוצר working אם לא קיים
@@ -131,67 +133,20 @@ export default function SeatingEditor({ classroomId }: Props) {
     setPickedStudentId(null);
   };
 
-  // אוטו-שיבוץ: קודם מזווג זוגות שמסומנים הדדית "עובד טוב ליד" באותו שולחן זוגי,
-  // אחר כך ממלא את השאר בסדר אקראי
-  const autoFillSimple = () => {
-    const emptySeats = classroom.seats.filter((s) => !seatToStudentId.has(s.id));
-    if (emptySeats.length === 0 || unassigned.length === 0) return;
-
-    const next = [...assignments];
-    const remaining = new Set(unassigned.map((s) => s.id));
-
-    // 1. מצא זוגות הדדיים של "עובד טוב ליד"
-    const mutualPairs: Array<[string, string]> = [];
-    for (const a of unassigned) {
-      if (!remaining.has(a.id)) continue;
-      for (const bId of a.preferredNear) {
-        if (!remaining.has(bId) || bId === a.id) continue;
-        const b = unassigned.find((s) => s.id === bId);
-        if (!b) continue;
-        const mutual = b.preferredNear.includes(a.id);
-        const conflict = a.avoidNear.includes(b.id) || b.avoidNear.includes(a.id);
-        if (mutual && !conflict) {
-          mutualPairs.push([a.id, b.id]);
-          remaining.delete(a.id);
-          remaining.delete(b.id);
-          break;
-        }
+  // יצירת סידור AI — מריץ 60 ניסיונות ובוחר הטוב ביותר לפי אילוצי תלמידים
+  const generateWithAI = () => {
+    if (students.length === 0 || classroom.seats.length === 0) return;
+    setGenerating(true);
+    // setTimeout כדי לאפשר ל-UI להתעדכן לפני החישוב הכבד
+    setTimeout(() => {
+      try {
+        const result = generateSeatingArrangement(classroom, students, { candidates: 60 });
+        updateAssignments(classroomId, result.assignments);
+        setPickedStudentId(null);
+      } finally {
+        setGenerating(false);
       }
-    }
-
-    // 2. שולחנות זוגיים שכל המושבים בהם פנויים
-    const usedSeatIds = new Set(next.map((a) => a.seatId));
-    const emptyPairDesks: Array<{ seats: typeof classroom.seats }> = [];
-    for (const d of classroom.desks) {
-      if (d.seatCount !== 2) continue;
-      const seats = classroom.seats.filter((s) => s.deskId === d.id && !usedSeatIds.has(s.id));
-      if (seats.length === 2) emptyPairDesks.push({ seats });
-    }
-
-    // 3. שלח זוגות הדדיים לשולחנות זוגיים פנויים
-    for (const [aId, bId] of mutualPairs) {
-      const desk = emptyPairDesks.shift();
-      if (!desk) {
-        // אין יותר שולחנות זוגיים פנויים — נחזיר אותם לשאר
-        remaining.add(aId);
-        remaining.add(bId);
-        continue;
-      }
-      next.push({ seatId: desk.seats[0].id, studentId: aId });
-      next.push({ seatId: desk.seats[1].id, studentId: bId });
-      usedSeatIds.add(desk.seats[0].id);
-      usedSeatIds.add(desk.seats[1].id);
-    }
-
-    // 4. ממלא את השאר אקראית
-    const remainingSeats = classroom.seats.filter((s) => !usedSeatIds.has(s.id));
-    const remainingStudents = unassigned.filter((s) => remaining.has(s.id));
-    const shuffled = [...remainingStudents].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < shuffled.length && i < remainingSeats.length; i++) {
-      next.push({ seatId: remainingSeats[i].id, studentId: shuffled[i].id });
-    }
-
-    updateAssignments(classroomId, next);
+    }, 30);
   };
 
   // ── רינדור ────────────────────────────────────
@@ -292,17 +247,17 @@ export default function SeatingEditor({ classroomId }: Props) {
             display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center',
           }}>
             <button
-              onClick={autoFillSimple}
-              disabled={unassigned.length === 0 || classroom.seats.length === assignments.length}
+              onClick={generateWithAI}
+              disabled={generating || students.length === 0 || classroom.seats.length === 0}
               style={{
-                background: 'var(--ac)', color: '#fff', border: 'none',
+                background: generating ? '#a78bfa' : 'var(--ac)', color: '#fff', border: 'none',
                 borderRadius: 'var(--rs)', padding: '8px 16px', fontWeight: 800, fontSize: 13,
-                cursor: unassigned.length > 0 ? 'pointer' : 'not-allowed',
-                opacity: unassigned.length > 0 ? 1 : 0.5,
+                cursor: generating || students.length === 0 ? 'not-allowed' : 'pointer',
+                opacity: generating || students.length === 0 ? 0.7 : 1,
                 fontFamily: 'inherit',
               }}
             >
-              🎲 השלם אקראית
+              {generating ? '⏳ מחשב...' : '✨ צור סידור AI'}
             </button>
             <button
               onClick={clearAllAssignments}
