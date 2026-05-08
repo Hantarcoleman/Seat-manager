@@ -705,10 +705,11 @@ export default function SeatingEditor({ classroomId }: Props) {
 
         {/* ── עמודה ימנית ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* אזור המתנה — ראשון בעמודה, בקו עם ראש הקנבס */}
+          {/* אזור המתנה — מיושר עם הקיר האחורי (תחתית הקנבס) */}
           <div
             onClick={onParkingDrop}
             style={{
+              marginTop: classroom.height + 90,
               background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
               border: pickedStudentId && studentToSeatId.has(pickedStudentId)
                 ? '2px dashed var(--ac)' : '1px solid var(--bd)',

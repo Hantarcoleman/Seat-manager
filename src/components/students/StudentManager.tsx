@@ -110,13 +110,30 @@ export default function StudentManager({ classroomId }: Props) {
 
   // ── מצב סימון לפי מאפיין ──
   if (tagMode) {
-    const conflictTag = getConflictingTag(tagMode);
-    // תלמידים עם מאפיין סותר — מוצגים בנפרד
+    // needs_front: מטפלים בשתי קבוצות נפרדות במקום קבוצת סותר אחת
+    const isNeedsFrontMode = tagMode === 'needs_front';
+
+    // תלמידים עם needs_very_front — כבר בעדיפות גבוהה יותר, לא מציגים ברשימה הראשית
+    const veryFrontStudents = isNeedsFrontMode
+      ? students.filter((s) => s.tags.includes('needs_very_front'))
+      : [];
+    // תלמידים עם can_focus_back — גמישים, מוצגים בנפרד
+    const canFocusBackStudents = isNeedsFrontMode
+      ? students.filter((s) => s.tags.includes('can_focus_back') && !s.tags.includes('needs_very_front'))
+      : [];
+
+    const conflictTag = isNeedsFrontMode ? null : getConflictingTag(tagMode);
+    // תלמידים עם מאפיין סותר — מוצגים בנפרד (לא ב-needs_front שמטופל בנפרד)
     const conflictStudents = conflictTag
       ? students.filter((s) => s.tags.includes(conflictTag))
       : [];
-    // רשימה ראשית — ללא בעלי המאפיין הסותר
-    const mainStudents = students.filter((s) => !conflictTag || !s.tags.includes(conflictTag));
+
+    // רשימה ראשית:
+    // - needs_front: ללא needs_very_front וללא can_focus_back
+    // - שאר המאפיינים: ללא בעלי המאפיין הסותר
+    const mainStudents = isNeedsFrontMode
+      ? students.filter((s) => !s.tags.includes('needs_very_front') && !s.tags.includes('can_focus_back'))
+      : students.filter((s) => !conflictTag || !s.tags.includes(conflictTag));
 
     // מיין: עם המאפיין הנוכחי קודם, ואז סנן לפי חיפוש שם
     const sorted = [
@@ -125,6 +142,10 @@ export default function StudentManager({ classroomId }: Props) {
     ].filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
 
     const filteredConflict = conflictStudents
+      .filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
+    const filteredVeryFront = veryFrontStudents
+      .filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
+    const filteredCanFocusBack = canFocusBackStudents
       .filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
 
     return (
@@ -218,6 +239,104 @@ export default function StudentManager({ classroomId }: Props) {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* needs_front: תלמידים שכבר בשורה הקדמית ביותר (needs_very_front) */}
+        {filteredVeryFront.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{
+              background: '#fdf2f8', border: '1.5px solid #fbcfe8', borderRadius: 'var(--rs)',
+              padding: '8px 14px', marginBottom: 8,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ fontSize: 16 }}>🔴</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 800, fontSize: 13, color: '#be185d' }}>
+                  {filteredVeryFront.length} תלמידים — כבר מסווגים לשורה הקדמית ביותר
+                </span>
+                <div style={{ fontSize: 11, color: '#9d174d', marginTop: 2 }}>
+                  אינם צריכים גם סיווג "שתי שורות קדמיות" — עדיפות השורה הראשונה כבר מובטחת
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8, opacity: 0.65 }}>
+              {filteredVeryFront.map((s) => {
+                const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                return (
+                  <div key={s.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    background: '#fdf2f8', border: '2px solid #fbcfe8',
+                    borderRadius: 'var(--r)', padding: '10px 14px',
+                  }}>
+                    <span style={{
+                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      background: '#f9a8d4', border: '2px solid #fbcfe8',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, color: '#be185d', fontWeight: 800,
+                    }}>🔴</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: nameColor }}>
+                        {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#9d174d', marginTop: 1 }}>שורה קדמית ביותר</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* needs_front: תלמידים עם can_focus_back — יכולים לשבת מאחור */}
+        {filteredCanFocusBack.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <div style={{
+              background: '#f0fdf4', border: '1.5px solid #bbf7d0', borderRadius: 'var(--rs)',
+              padding: '8px 14px', marginBottom: 8,
+              display: 'flex', alignItems: 'center', gap: 8,
+            }}>
+              <span style={{ fontSize: 16 }}>🔚</span>
+              <div style={{ flex: 1 }}>
+                <span style={{ fontWeight: 800, fontSize: 13, color: '#166534' }}>
+                  {filteredCanFocusBack.length} תלמידים — יכולים לשבת מאחור
+                </span>
+                <div style={{ fontSize: 11, color: '#166534', marginTop: 2 }}>
+                  לחץ על תלמיד כדי להחליף ל"חייב אחת משתי שורות קדמיות" במקום "יכול מאחור"
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+              {filteredCanFocusBack.map((s) => {
+                const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => removeConflictTag(s.id, 'can_focus_back')}
+                    title='בטל "יכול מאחור" ולחץ לסמן "חייב שתי שורות קדמיות"'
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      background: '#f0fdf4', border: '2px solid #bbf7d0',
+                      borderRadius: 'var(--r)', padding: '10px 14px',
+                      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'right',
+                    }}
+                  >
+                    <span style={{
+                      width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                      background: '#86efac', border: '2px solid #4ade80',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 11, color: '#166534', fontWeight: 800,
+                    }}>🔚</span>
+                    <div style={{ flex: 1, textAlign: 'right' }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: nameColor }}>
+                        {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#166534', marginTop: 1 }}>יכול/ה להתרכז מאחור</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
 
