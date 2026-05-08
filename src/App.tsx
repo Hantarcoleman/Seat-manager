@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
 import DeskLayoutPage from './pages/DeskLayoutPage';
@@ -77,8 +77,8 @@ function AppShell() {
 
 export default function App() {
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL}>
+    <HashRouter>
       <AppShell />
-    </BrowserRouter>
+    </HashRouter>
   );
 }
