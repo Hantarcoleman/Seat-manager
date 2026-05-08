@@ -271,11 +271,12 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
-    const w = desk.seatCount === 2 ? 130 : 80;
-    const h = 70;
+    // רוחב שולחן זוגי מכיל 2 עיגולים r=28 עם dx=±33 → outer edge=61, margin=4 מכל צד
+    // גובה אחיד 76 → margin top/bottom: זוגי 76/2-28=10, יחיד 76/2-34=4
+    const w = desk.seatCount === 2 ? 134 : 80;
+    const h = 76;
     return (
       <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation}>
-        {/* גוף השולחן — לא מאזין לאירועים, רק תצוגה */}
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
               fill="#e7e5e4" stroke="#78716c" strokeWidth={1.5} cornerRadius={6}
               listening={false} />
@@ -285,7 +286,11 @@ export default function SeatingEditor({ classroomId }: Props) {
   };
 
   const renderSeat = (seat: Seat) => {
-    const dx = seat.side === 'solo' ? 0 : (seat.side === 'left' ? -32 : 32);
+    // עיגול זוגי: r=28, dx=±33 — עיגול יחיד: r=34
+    const isSolo = seat.side === 'solo';
+    const r = isSolo ? 34 : 28;
+    const dx = isSolo ? 0 : (seat.side === 'left' ? -33 : 33);
+
     const studentId = seatToStudentId.get(seat.id);
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
     const isPicked = pickedStudentId && studentId === pickedStudentId;
@@ -300,12 +305,30 @@ export default function SeatingEditor({ classroomId }: Props) {
       : '#a8a29e';
     const strokeColor = isPicked ? '#ea580c' : isPinned ? '#7c3aed' : isFlagged ? '#dc2626' : (stu ? '#16a34a' : '#a8a29e');
     const strokeW = isPicked || isFlagged || isPinned ? 3 : 2;
-    const displayName = stu ? (stu.name.length > 11 ? stu.name.slice(0, 10) + '…' : stu.name) : '';
+
+    // שם פרטי בשורה 1, שם משפחה בשורה 2
+    const parts = stu ? stu.name.trim().split(/\s+/) : [];
+    const firstName = parts[0] ?? '';
+    const lastName = parts.slice(1).join(' ');
+    const trunc = (s: string, n: number) => s.length > n ? s.slice(0, n - 1) + '…' : s;
+    const maxChars = isSolo ? 9 : 7;
+    const line1 = trunc(firstName, maxChars);
+    const line2 = trunc(lastName, maxChars);
+
+    // מרכז טקסט: שני שורות 10px גובה + 2px רווח = 22px סה"כ → מתחיל ב-y=-11
+    const fontSize = isSolo ? 10 : 9;
+    const lineH = fontSize + 2;
+    const textW = Math.round(r * 1.6); // רוחב בטוח בתוך העיגול
+    const textStartY = -Math.round(lineH);  // שתי שורות ממורכזות: -lineH עד +lineH
+
+    // מיקום כפתור נעיצה — פינה עליונה ימנית של העיגול (~45°)
+    const pinOff = Math.round(r * 0.68);
+    const pinR = 9;
 
     return (
       <Group key={seat.id}>
         <Circle
-          x={dx} y={0} radius={22}
+          x={dx} y={0} radius={r}
           fill={bgColor} stroke={strokeColor} strokeWidth={strokeW}
           listening={true}
           onClick={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
@@ -314,34 +337,45 @@ export default function SeatingEditor({ classroomId }: Props) {
           onDblTap={(e) => { e.cancelBubble = true; onSeatDblClick(seat.id); }}
         />
         {stu && (
-          <Text
-            x={dx - 26} y={-5}
-            width={52} align="center"
-            text={displayName}
-            fontSize={10} fontFamily="Heebo" fill={textColor} fontStyle="bold"
-            listening={false}
-          />
+          <>
+            <Text
+              x={dx - textW / 2} y={textStartY - lineH / 2}
+              width={textW} align="center"
+              text={line1}
+              fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+              listening={false}
+            />
+            {line2 && (
+              <Text
+                x={dx - textW / 2} y={textStartY - lineH / 2 + lineH + 2}
+                width={textW} align="center"
+                text={line2}
+                fontSize={fontSize} fontFamily="Heebo" fill={textColor}
+                listening={false}
+              />
+            )}
+          </>
         )}
-        {/* כפתור נעיצה — מוצג רק כשיש תלמיד במושב */}
+        {/* כפתור נעיצה */}
         {stu && (
-          <Circle
-            x={dx + 16} y={-16} radius={9}
-            fill={isPinned ? '#7c3aed' : '#e2e8f0'}
-            stroke={isPinned ? '#5b21b6' : '#94a3b8'}
-            strokeWidth={1}
-            listening={true}
-            onClick={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
-            onTap={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
-          />
-        )}
-        {stu && (
-          <Text
-            x={dx + 7} y={-25}
-            width={18} align="center"
-            text="📌"
-            fontSize={isPinned ? 9 : 8}
-            listening={false}
-          />
+          <>
+            <Circle
+              x={dx + pinOff} y={-pinOff} radius={pinR}
+              fill={isPinned ? '#7c3aed' : '#e2e8f0'}
+              stroke={isPinned ? '#5b21b6' : '#94a3b8'}
+              strokeWidth={1}
+              listening={true}
+              onClick={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
+              onTap={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
+            />
+            <Text
+              x={dx + pinOff - pinR} y={-pinOff - pinR + 1}
+              width={pinR * 2} align="center"
+              text="📌"
+              fontSize={isPinned ? 9 : 8}
+              listening={false}
+            />
+          </>
         )}
       </Group>
     );
