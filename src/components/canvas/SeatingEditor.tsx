@@ -10,6 +10,7 @@ import { generateSeatingArrangement } from '../../services/seatingAlgorithm';
 import { exportSeatsPdf } from '../../services/pdfExportService';
 import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncService';
 import { isSupabaseEnabled } from '../../services/supabaseClient';
+import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, ArrangementWarning, SeatingArrangement } from '../../types';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -35,6 +36,11 @@ export default function SeatingEditor({ classroomId }: Props) {
   const pinnedSet = useMemo(() => new Set(pinnedStudentIds), [pinnedStudentIds]);
 
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
+  const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
+  const [hoveredStudentId, setHoveredStudentId] = useState<string | null>(null);
+  const [separateGenders, setSeparateGenders] = useState(false);
+  const [aiProposals, setAiProposals] = useState<SeatingArrangement[]>([]);
+  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const [generating, setGenerating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -47,13 +53,11 @@ export default function SeatingEditor({ classroomId }: Props) {
   const restore = useArrangementStore((s) => s.restore);
   const localHistory = useMemo(() => listForClassroom(classroomId), [listForClassroom, classroomId, working]);
 
-  // טעינת היסטוריה מהענן כשמציגים אותה
   useEffect(() => {
     if (!showHistory || !isSupabaseEnabled() || !user) return;
     loadHistory(classroomId).then(setCloudHistory);
   }, [showHistory, classroomId, user]);
 
-  // יוצר working אם לא קיים
   useEffect(() => {
     if (!working && classroom) {
       setWorking(classroomId, {
@@ -69,23 +73,33 @@ export default function SeatingEditor({ classroomId }: Props) {
     }
   }, [working, classroom, classroomId, setWorking]);
 
+  // השיבוצים הנוכחיים מהחנות (תמיד)
   const assignments = working?.assignments ?? [];
+
+  // שיבוצים לתצוגה — בתצוגה מקדימה מציגים ההצעה, אחרת את הנוכחיים
+  const displayAssignments = useMemo(() => {
+    if (previewIdx !== null && aiProposals[previewIdx]) {
+      return aiProposals[previewIdx].assignments;
+    }
+    return assignments;
+  }, [previewIdx, aiProposals, assignments]);
 
   const seatToStudentId = useMemo(() => {
     const m = new Map<string, string>();
-    for (const a of assignments) m.set(a.seatId, a.studentId);
+    for (const a of displayAssignments) m.set(a.seatId, a.studentId);
     return m;
-  }, [assignments]);
+  }, [displayAssignments]);
 
   const studentToSeatId = useMemo(() => {
     const m = new Map<string, string>();
-    for (const a of assignments) m.set(a.studentId, a.seatId);
+    for (const a of displayAssignments) m.set(a.studentId, a.seatId);
     return m;
-  }, [assignments]);
+  }, [displayAssignments]);
 
-  const unassigned = useMemo(() => {
-    return students.filter((s) => !studentToSeatId.has(s.id));
-  }, [students, studentToSeatId]);
+  const unassigned = useMemo(
+    () => students.filter((s) => !studentToSeatId.has(s.id)),
+    [students, studentToSeatId]
+  );
 
   const filteredUnassigned = useMemo(() => {
     if (!search.trim()) return unassigned;
@@ -96,42 +110,113 @@ export default function SeatingEditor({ classroomId }: Props) {
     () => students.filter((s) => s.tags.includes('better_alone')).length,
     [students]
   );
-  const availableSeats = classroom ? classroom.seats.length - assignments.length : 0;
+  const availableSeats = classroom ? classroom.seats.length - displayAssignments.length : 0;
 
-  const warnings = useMemo(() => {
-    if (!working || !classroom) return [] as ArrangementWarning[];
-    return validateAssignments(working, classroom, students);
-  }, [working, classroom, students]);
+  // אזהרות וציון — בתצוגה מקדימה משתמשים בנתוני ההצעה
+  const displayWarnings = useMemo((): ArrangementWarning[] => {
+    if (!classroom) return [];
+    if (previewIdx !== null && aiProposals[previewIdx]) {
+      return aiProposals[previewIdx].warnings;
+    }
+    if (!working) return [];
+    return validateAssignments(working, classroom, students, { separateGenders });
+  }, [previewIdx, aiProposals, working, classroom, students, separateGenders]);
 
-  const score = scoreArrangement(warnings);
+  const displayScore = useMemo(() => {
+    if (previewIdx !== null && aiProposals[previewIdx]) return aiProposals[previewIdx].score;
+    return scoreArrangement(displayWarnings);
+  }, [previewIdx, aiProposals, displayWarnings]);
 
-  // האם המושב או התלמיד מסומן באזהרה?
   const flaggedSeatIds = useMemo(() => {
     const s = new Set<string>();
-    warnings.forEach((w) => w.seatIds?.forEach((id) => s.add(id)));
+    displayWarnings.forEach((w) => w.seatIds?.forEach((id) => s.add(id)));
     return s;
-  }, [warnings]);
+  }, [displayWarnings]);
+
+  // מיקום מוחלט (stage-space) של כל מושב — לצורך חישוב נקודת נחיתה בגרירה
+  const seatAbsolutePositions = useMemo(() => {
+    if (!classroom) return new Map<string, { x: number; y: number }>();
+    const map = new Map<string, { x: number; y: number }>();
+    for (const desk of classroom.desks) {
+      const seats = classroom.seats.filter((s) => s.deskId === desk.id);
+      for (const seat of seats) {
+        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -33 : 33;
+        const rot = (desk.rotation * Math.PI) / 180;
+        map.set(seat.id, {
+          x: desk.position.x + Math.cos(rot) * dx,
+          y: desk.position.y + Math.sin(rot) * dx,
+        });
+      }
+    }
+    return map;
+  }, [classroom]);
+
+  // התלמיד הפעיל לצורך הדגשת מושבים (נגרר / נבחר)
+  const activeSeatQualityStudentId = previewIdx !== null ? null : (draggedStudentId ?? pickedStudentId);
+
+  // איכות כל מושב עבור התלמיד הפעיל
+  const seatQualities = useMemo(() => {
+    if (!activeSeatQualityStudentId || !classroom) return new Map<string, 'good' | 'bad' | 'neutral'>();
+    const stu = students.find((s) => s.id === activeSeatQualityStudentId);
+    if (!stu) return new Map<string, 'good' | 'bad' | 'neutral'>();
+
+    const result = new Map<string, 'good' | 'bad' | 'neutral'>();
+    for (const seat of classroom.seats) {
+      const zones = new Set([...(seat.autoZones ?? []), ...(seat.manualZones ?? [])]);
+      let bad = false;
+      let good = false;
+
+      // בדיקת avoidNear — השכן בשולחן
+      const deskSeats = classroom.seats.filter((s) => s.deskId === seat.deskId && s.id !== seat.id);
+      for (const ds of deskSeats) {
+        const nid = seatToStudentId.get(ds.id);
+        if (!nid || nid === activeSeatQualityStudentId) continue;
+        if (stu.avoidNear.includes(nid)) { bad = true; break; }
+        const n = students.find((s) => s.id === nid);
+        if (n?.avoidNear.includes(stu.id)) { bad = true; break; }
+      }
+
+      if (stu.tags.includes('needs_front')) { if (zones.has('front_row')) good = true; else bad = true; }
+      if (stu.tags.includes('needs_wall') && zones.has('near_wall')) good = true;
+      if (stu.tags.includes('distractible') && (zones.has('near_window') || zones.has('near_door'))) bad = true;
+      if (stu.tags.includes('better_alone') && seat.side === 'solo') good = true;
+      if (stu.tags.includes('tall') && (zones.has('back_row') || zones.has('side_column'))) good = true;
+
+      result.set(seat.id, bad ? 'bad' : good ? 'good' : 'neutral');
+    }
+    return result;
+  }, [activeSeatQualityStudentId, classroom, students, seatToStudentId]);
+
+  // הסבר שיבוץ — לתלמיד המרחף / הנבחר
+  const explanationStudentId = hoveredStudentId ?? pickedStudentId;
+
+  const placementExplanation = useMemo(() => {
+    if (!explanationStudentId || !classroom || !working) return null;
+    return getPlacementExplanation(explanationStudentId, { ...working, assignments: displayAssignments }, classroom, students);
+  }, [explanationStudentId, working, displayAssignments, classroom, students]);
 
   if (!classroom) return null;
 
-  // ── פעולות שיבוץ ────────────────────────────────
+  // ── פעולות שיבוץ ──────────────────────────────────────────
   const assignToSeat = (seatId: string, studentId: string) => {
+    if (previewIdx !== null) return;
     const next = assignments.filter((a) => a.seatId !== seatId && a.studentId !== studentId);
     next.push({ seatId, studentId });
     updateAssignments(classroomId, next);
   };
 
   const removeFromSeat = (seatId: string) => {
+    if (previewIdx !== null) return;
     updateAssignments(classroomId, assignments.filter((a) => a.seatId !== seatId));
   };
 
   const onSeatClick = (seatId: string) => {
+    if (previewIdx !== null) return;
     const occupant = seatToStudentId.get(seatId);
     if (pickedStudentId) {
       if (pinnedSet.has(pickedStudentId)) { setPickedStudentId(null); return; }
       const pickedSeat = studentToSeatId.get(pickedStudentId);
       if (occupant && occupant !== pickedStudentId) {
-        // החלפת מקומות בין שני תלמידים יושבים
         if (pinnedSet.has(occupant)) { setPickedStudentId(null); return; }
         if (pickedSeat) {
           const next = assignments.map((a) => {
@@ -152,8 +237,8 @@ export default function SeatingEditor({ classroomId }: Props) {
     }
   };
 
-  // דאבל קליק על מושב תפוס — החזר תלמיד לרשימת ההמתנה
   const onSeatDblClick = (seatId: string) => {
+    if (previewIdx !== null) return;
     const occupant = seatToStudentId.get(seatId);
     if (occupant && !pinnedSet.has(occupant)) {
       removeFromSeat(seatId);
@@ -162,18 +247,14 @@ export default function SeatingEditor({ classroomId }: Props) {
   };
 
   const onParkingStudentClick = (studentId: string) => {
-    if (pickedStudentId === studentId) {
-      setPickedStudentId(null);
-    } else {
-      setPickedStudentId(studentId);
-    }
+    if (previewIdx !== null) return;
+    setPickedStudentId(pickedStudentId === studentId ? null : studentId);
   };
 
-  // לחיצה על "אזור המתנה" עם נבחר תפוס — מסירה אותו מהמושב
   const onParkingDrop = () => {
+    if (previewIdx !== null) return;
     if (pickedStudentId && studentToSeatId.has(pickedStudentId)) {
-      const seatId = studentToSeatId.get(pickedStudentId)!;
-      removeFromSeat(seatId);
+      removeFromSeat(studentToSeatId.get(pickedStudentId)!);
       setPickedStudentId(null);
     }
   };
@@ -181,31 +262,100 @@ export default function SeatingEditor({ classroomId }: Props) {
   const clearAllAssignments = () => {
     if (assignments.length === 0) return;
     if (!confirm(`לנקות את כל ${assignments.length} השיבוצים?`)) return;
+    setAiProposals([]); setPreviewIdx(null);
     updateAssignments(classroomId, []);
     clearPins(classroomId);
     setPickedStudentId(null);
   };
 
-  // יצירת סידור AI — מריץ 60 ניסיונות, שומר תלמידים נעוצים במקומם
+  // ── גרירה מה-Konva (בין מושבים) ─────────────────────────────
+  const onKonvaDragEnd = (
+    e: { target: { getAbsolutePosition: () => { x: number; y: number }; position: (p: { x: number; y: number }) => void }; cancelBubble: boolean },
+    seatId: string,
+    dx: number
+  ) => {
+    e.cancelBubble = true;
+    const node = e.target;
+    const absPos = node.getAbsolutePosition();
+    node.position({ x: dx, y: 0 });
+
+    const draggedId = seatToStudentId.get(seatId);
+    setDraggedStudentId(null);
+    if (!draggedId) return;
+
+    let minDist = Infinity;
+    let targetSeatId: string | null = null;
+    for (const [sid, pos] of seatAbsolutePositions) {
+      if (sid === seatId) continue;
+      const d = Math.hypot(absPos.x - pos.x, absPos.y - pos.y);
+      if (d < minDist) { minDist = d; targetSeatId = sid; }
+    }
+    if (!targetSeatId || minDist > 60) return;
+
+    const targetOccupant = seatToStudentId.get(targetSeatId);
+    if (targetOccupant) {
+      if (pinnedSet.has(targetOccupant)) return;
+      const next = assignments.map((a) => {
+        if (a.seatId === seatId) return { seatId: targetSeatId!, studentId: draggedId };
+        if (a.seatId === targetSeatId) return { seatId, studentId: targetOccupant };
+        return a;
+      });
+      updateAssignments(classroomId, next);
+    } else {
+      updateAssignments(classroomId, assignments.map((a) =>
+        a.seatId === seatId ? { seatId: targetSeatId!, studentId: draggedId } : a
+      ));
+    }
+  };
+
+  // ── גרירה מאזור ההמתנה (HTML5) אל הקנבס ────────────────────
+  const onCanvasDragOver = (e: React.DragEvent) => e.preventDefault();
+
+  const onCanvasDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    const studentId = e.dataTransfer.getData('text/plain');
+    setDraggedStudentId(null);
+    if (!studentId) return;
+    const container = stageRef.current?.container();
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const stageX = e.clientX - rect.left;
+    const stageY = e.clientY - rect.top;
+
+    let minDist = Infinity;
+    let targetSeatId: string | null = null;
+    for (const [sid, pos] of seatAbsolutePositions) {
+      if (seatToStudentId.has(sid)) continue;
+      const d = Math.hypot(stageX - pos.x, stageY - pos.y);
+      if (d < minDist) { minDist = d; targetSeatId = sid; }
+    }
+    if (targetSeatId && minDist < 60) assignToSeat(targetSeatId, studentId);
+  };
+
+  // ── יצירת 3 הצעות AI ─────────────────────────────────────────
   const generateWithAI = () => {
     if (students.length === 0 || classroom.seats.length === 0) return;
     setGenerating(true);
     setTimeout(() => {
       try {
-        // תלמידים נעוצים — שמור את שיבוציהם הנוכחיים
         const pinnedAssignments = assignments.filter((a) => pinnedSet.has(a.studentId));
         const pinnedSeatIds = new Set(pinnedAssignments.map((a) => a.seatId));
         const pinnedStudIds = new Set(pinnedAssignments.map((a) => a.studentId));
-
-        // הרץ AI רק על תלמידים ומושבים שאינם נעוצים
         const freeStudents = students.filter((s) => !pinnedStudIds.has(s.id));
-        const freeClassroom = {
-          ...classroom,
-          seats: classroom.seats.filter((s) => !pinnedSeatIds.has(s.id)),
-        };
+        const freeClassroom = { ...classroom, seats: classroom.seats.filter((s) => !pinnedSeatIds.has(s.id)) };
+        const baseSeed = Date.now();
 
-        const result = generateSeatingArrangement(freeClassroom, freeStudents, { candidates: 60 });
-        updateAssignments(classroomId, [...pinnedAssignments, ...result.assignments]);
+        const proposals = [0, 12345, 67890].map((offset) => {
+          const raw = generateSeatingArrangement(freeClassroom, freeStudents, {
+            candidates: 60, seed: baseSeed + offset, separateGenders,
+          });
+          const merged = { ...raw, assignments: [...pinnedAssignments, ...raw.assignments] };
+          const warnings = validateAssignments(merged, classroom, students, { separateGenders });
+          return { ...merged, warnings, score: scoreArrangement(warnings) };
+        });
+
+        setAiProposals(proposals);
+        setPreviewIdx(0);
         setPickedStudentId(null);
       } finally {
         setGenerating(false);
@@ -213,7 +363,17 @@ export default function SeatingEditor({ classroomId }: Props) {
     }, 30);
   };
 
-  // ייצוא PDF — לוכד את הקנבס ומוסיף כותרת
+  const applyProposal = (idx: number) => {
+    const proposal = aiProposals[idx];
+    if (!proposal) return;
+    updateAssignments(classroomId, proposal.assignments);
+    setAiProposals([]);
+    setPreviewIdx(null);
+    setPickedStudentId(null);
+  };
+
+  const cancelProposals = () => { setAiProposals([]); setPreviewIdx(null); };
+
   const exportPdf = () => {
     if (!stageRef.current || !classroom) return;
     exportSeatsPdf(stageRef.current, {
@@ -223,7 +383,6 @@ export default function SeatingEditor({ classroomId }: Props) {
     });
   };
 
-  // שמירת סידור עם שם + העלאה להיסטוריה בענן
   const saveArrangement = async () => {
     if (!working) return;
     const name = prompt('שם לסידור (לדוגמה: "שבוע א\'")', `סידור ${new Date().toLocaleDateString('he-IL')}`);
@@ -235,14 +394,13 @@ export default function SeatingEditor({ classroomId }: Props) {
     }
   };
 
-  // שחזור סידור מהיסטוריה
   const restoreFromHistory = (arr: SeatingArrangement) => {
     updateAssignments(classroomId, arr.assignments);
     setPickedStudentId(null);
     setShowHistory(false);
   };
 
-  // ── רינדור ────────────────────────────────────
+  // ── רינדור קנבס ───────────────────────────────────────────────
   const renderWall = (w: Wall) => {
     const style = WALL_STYLES[w.type] ?? WALL_STYLES.blank;
     const flat: number[] = [];
@@ -271,8 +429,6 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
-    // רוחב שולחן זוגי מכיל 2 עיגולים r=28 עם dx=±33 → outer edge=61, margin=4 מכל צד
-    // גובה אחיד 76 → margin top/bottom: זוגי 76/2-28=10, יחיד 76/2-34=4
     const w = desk.seatCount === 2 ? 134 : 80;
     const h = 76;
     return (
@@ -286,84 +442,93 @@ export default function SeatingEditor({ classroomId }: Props) {
   };
 
   const renderSeat = (seat: Seat) => {
-    // עיגול זוגי: r=28, dx=±33 — עיגול יחיד: r=34
     const isSolo = seat.side === 'solo';
     const r = isSolo ? 34 : 28;
     const dx = isSolo ? 0 : (seat.side === 'left' ? -33 : 33);
 
     const studentId = seatToStudentId.get(seat.id);
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
-    const isPicked = pickedStudentId && studentId === pickedStudentId;
+    const isPicked = pickedStudentId != null && studentId === pickedStudentId;
+    const isActiveSource = activeSeatQualityStudentId != null && studentId === activeSeatQualityStudentId;
     const isFlagged = flaggedSeatIds.has(seat.id);
     const isPinned = studentId ? pinnedSet.has(studentId) : false;
+    const quality = (!stu && activeSeatQualityStudentId) ? seatQualities.get(seat.id) : undefined;
 
-    const bgColor = stu
-      ? (stu.gender === 'm' ? '#dbeafe' : stu.gender === 'f' ? '#fce7f3' : '#fff')
-      : '#fff';
+    // צבעי עיגול
+    let bgColor: string;
+    let strokeColor: string;
+    let strokeW: number;
+
+    if (stu) {
+      bgColor = stu.gender === 'm' ? '#dbeafe' : stu.gender === 'f' ? '#fce7f3' : '#fff';
+      if (isActiveSource || isPicked) { strokeColor = '#ea580c'; strokeW = 3; }
+      else if (isPinned)              { strokeColor = '#7c3aed'; strokeW = 3; }
+      else if (isFlagged)             { strokeColor = '#dc2626'; strokeW = 3; }
+      else                            { strokeColor = '#16a34a'; strokeW = 2; }
+    } else if (quality === 'good') {
+      bgColor = '#dcfce7'; strokeColor = '#16a34a'; strokeW = 2;
+    } else if (quality === 'bad') {
+      bgColor = '#fee2e2'; strokeColor = '#dc2626'; strokeW = 2;
+    } else {
+      bgColor = '#fff'; strokeColor = '#a8a29e'; strokeW = 2;
+    }
+
+    const parts = stu ? stu.name.trim().split(/\s+/) : [];
+    const line1 = trunc(parts[0] ?? '', isSolo ? 9 : 7);
+    const line2 = trunc(parts.slice(1).join(' '), isSolo ? 9 : 7);
+    const fontSize = isSolo ? 10 : 9;
+    const lineH = fontSize + 2;
+    const textW = Math.round(r * 1.6);
+    const textStartY = -Math.round(lineH);
+    const pinOff = Math.round(r * 0.68);
+    const pinR = 9;
     const textColor = stu
       ? (stu.gender === 'm' ? '#1d4ed8' : stu.gender === 'f' ? '#be185d' : '#1c1917')
       : '#a8a29e';
-    const strokeColor = isPicked ? '#ea580c' : isPinned ? '#7c3aed' : isFlagged ? '#dc2626' : (stu ? '#16a34a' : '#a8a29e');
-    const strokeW = isPicked || isFlagged || isPinned ? 3 : 2;
 
-    // שם פרטי בשורה 1, שם משפחה בשורה 2
-    const parts = stu ? stu.name.trim().split(/\s+/) : [];
-    const firstName = parts[0] ?? '';
-    const lastName = parts.slice(1).join(' ');
-    const trunc = (s: string, n: number) => s.length > n ? s.slice(0, n - 1) + '…' : s;
-    const maxChars = isSolo ? 9 : 7;
-    const line1 = trunc(firstName, maxChars);
-    const line2 = trunc(lastName, maxChars);
-
-    // מרכז טקסט: שני שורות 10px גובה + 2px רווח = 22px סה"כ → מתחיל ב-y=-11
-    const fontSize = isSolo ? 10 : 9;
-    const lineH = fontSize + 2;
-    const textW = Math.round(r * 1.6); // רוחב בטוח בתוך העיגול
-    const textStartY = -Math.round(lineH);  // שתי שורות ממורכזות: -lineH עד +lineH
-
-    // מיקום כפתור נעיצה — פינה עליונה ימנית של העיגול (~45°)
-    const pinOff = Math.round(r * 0.68);
-    const pinR = 9;
+    const canDrag = !!stu && !isPinned && previewIdx === null;
 
     return (
       <Group key={seat.id}>
         <Circle
           x={dx} y={0} radius={r}
           fill={bgColor} stroke={strokeColor} strokeWidth={strokeW}
+          draggable={canDrag}
           listening={true}
+          onMouseEnter={() => { if (stu) setHoveredStudentId(stu.id); }}
+          onMouseLeave={() => setHoveredStudentId(null)}
           onClick={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
           onTap={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
           onDblClick={(e) => { e.cancelBubble = true; onSeatDblClick(seat.id); }}
           onDblTap={(e) => { e.cancelBubble = true; onSeatDblClick(seat.id); }}
+          onDragStart={(e) => { e.cancelBubble = true; if (stu) setDraggedStudentId(stu.id); }}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onDragEnd={(e: any) => onKonvaDragEnd(e, seat.id, dx)}
         />
         {stu && (
           <>
             <Text
               x={dx - textW / 2} y={textStartY - lineH / 2}
               width={textW} align="center"
-              text={line1}
-              fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+              text={line1} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
               listening={false}
             />
             {line2 && (
               <Text
                 x={dx - textW / 2} y={textStartY - lineH / 2 + lineH + 2}
                 width={textW} align="center"
-                text={line2}
-                fontSize={fontSize} fontFamily="Heebo" fill={textColor}
+                text={line2} fontSize={fontSize} fontFamily="Heebo" fill={textColor}
                 listening={false}
               />
             )}
           </>
         )}
-        {/* כפתור נעיצה */}
         {stu && (
           <>
             <Circle
               x={dx + pinOff} y={-pinOff} radius={pinR}
               fill={isPinned ? '#7c3aed' : '#e2e8f0'}
-              stroke={isPinned ? '#5b21b6' : '#94a3b8'}
-              strokeWidth={1}
+              stroke={isPinned ? '#5b21b6' : '#94a3b8'} strokeWidth={1}
               listening={true}
               onClick={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
               onTap={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
@@ -371,9 +536,7 @@ export default function SeatingEditor({ classroomId }: Props) {
             <Text
               x={dx + pinOff - pinR} y={-pinOff - pinR + 1}
               width={pinR * 2} align="center"
-              text="📌"
-              fontSize={isPinned ? 9 : 8}
-              listening={false}
+              text="📌" fontSize={isPinned ? 9 : 8} listening={false}
             />
           </>
         )}
@@ -381,6 +544,7 @@ export default function SeatingEditor({ classroomId }: Props) {
     );
   };
 
+  // ── UI ────────────────────────────────────────────────────────
   return (
     <div>
       {/* פס סטטיסטיקה */}
@@ -396,18 +560,39 @@ export default function SeatingEditor({ classroomId }: Props) {
           { label: 'נעוצים', value: pinnedStudentIds.length, color: '#7c3aed' },
         ].map((stat) => (
           <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{
-              background: stat.color, color: '#fff', borderRadius: 10,
-              padding: '2px 9px', fontWeight: 800, fontSize: 13,
-            }}>{stat.value}</span>
+            <span style={{ background: stat.color, color: '#fff', borderRadius: 10, padding: '2px 9px', fontWeight: 800, fontSize: 13 }}>
+              {stat.value}
+            </span>
             <span style={{ fontSize: 12, color: 'var(--ink2)' }}>{stat.label}</span>
           </div>
         ))}
       </div>
 
-      <div style={{
-        display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start',
-      }}>
+      {/* באנר תצוגה מקדימה */}
+      {previewIdx !== null && (
+        <div style={{
+          background: '#fff7ed', border: '2px solid var(--ac)', borderRadius: 'var(--rs)',
+          padding: '8px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 700 }}>
+            👁 תצוגה מקדימה — הצעה {previewIdx + 1} (לא שמורה)
+          </span>
+          <button
+            onClick={() => applyProposal(previewIdx!)}
+            style={{ background: 'var(--ac)', color: '#fff', border: 'none', borderRadius: 'var(--rs)', padding: '6px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            ✓ החל
+          </button>
+          <button
+            onClick={cancelProposals}
+            style={{ background: 'none', border: '1px solid var(--bd)', borderRadius: 'var(--rs)', padding: '6px 12px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}
+          >
+            ✕ בטל
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
         {/* ── עמודה שמאלית: קנבס ── */}
         <div>
           {/* פעולות עליונות */}
@@ -423,11 +608,10 @@ export default function SeatingEditor({ classroomId }: Props) {
                 background: generating ? '#a78bfa' : 'var(--ac)', color: '#fff', border: 'none',
                 borderRadius: 'var(--rs)', padding: '8px 16px', fontWeight: 800, fontSize: 13,
                 cursor: generating || students.length === 0 ? 'not-allowed' : 'pointer',
-                opacity: generating || students.length === 0 ? 0.7 : 1,
-                fontFamily: 'inherit',
+                opacity: generating || students.length === 0 ? 0.7 : 1, fontFamily: 'inherit',
               }}
             >
-              {generating ? '⏳ מחשב...' : '✨ צור סידור AI'}
+              {generating ? '⏳ מחשב...' : '✨ 3 הצעות AI'}
             </button>
             <button
               onClick={saveArrangement}
@@ -457,43 +641,58 @@ export default function SeatingEditor({ classroomId }: Props) {
               onClick={clearAllAssignments}
               disabled={assignments.length === 0}
               style={{
-                background: 'var(--bg2)', color: 'var(--rd)',
+                background: 'var(--bg2)', color: '#dc2626',
                 border: '1.5px solid #fecaca', borderRadius: 'var(--rs)',
                 padding: '8px 16px', fontWeight: 700, fontSize: 13,
                 cursor: assignments.length > 0 ? 'pointer' : 'not-allowed',
-                opacity: assignments.length > 0 ? 1 : 0.5,
-                fontFamily: 'inherit',
+                opacity: assignments.length > 0 ? 1 : 0.5, fontFamily: 'inherit',
               }}
             >
               🗑 נקה הכל
             </button>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
+              <input
+                type="checkbox"
+                checked={separateGenders}
+                onChange={(e) => setSeparateGenders(e.target.checked)}
+                style={{ width: 15, height: 15 }}
+              />
+              הפרד בנים/בנות
+            </label>
             <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
-                <strong>{assignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
+                <strong>{displayAssignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
               </span>
               <span style={{
-                background: score >= 80 ? '#16a34a' : score >= 60 ? '#ca8a04' : '#dc2626',
-                color: '#fff', fontSize: 13, fontWeight: 800,
-                padding: '4px 10px', borderRadius: 12,
+                background: displayScore >= 80 ? '#16a34a' : displayScore >= 60 ? '#ca8a04' : '#dc2626',
+                color: '#fff', fontSize: 13, fontWeight: 800, padding: '4px 10px', borderRadius: 12,
               }}>
-                ציון: {score}
+                ציון: {displayScore}
               </span>
             </div>
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>
-            {pickedStudentId
-              ? '👆 לחץ על מושב לשיבוץ. לחץ על "אזור המתנה" להחזיר את התלמיד.'
-              : '💡 לחץ על תלמיד באזור ההמתנה ואז על מושב לשיבוץ. לחץ על תלמיד במושב כדי להזיזו.'}
+            {previewIdx !== null
+              ? '👁 תצוגה מקדימה בלבד — לחץ "החל" ליישום או "בטל" לחזרה'
+              : pickedStudentId
+                ? '👆 לחץ על מושב לשיבוץ · גרור ישירות · לחץ "אזור המתנה" להחזיר'
+                : '💡 לחץ/גרור תלמיד מרשימת ההמתנה · לחץ על מושב תפוס להזזה · דאבל-קליק להסרה'}
           </div>
 
-          <div style={{
-            background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
-            overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
-          }}>
-            <Stage ref={stageRef}
+          <div
+            style={{
+              background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
+              overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
+            }}
+            onDragOver={onCanvasDragOver}
+            onDrop={onCanvasDrop}
+          >
+            <Stage
+              ref={stageRef}
               width={classroom.width} height={classroom.height}
-              style={{ background: '#fff', cursor: pickedStudentId ? 'crosshair' : 'default' }}>
+              style={{ background: '#fff', cursor: (pickedStudentId || draggedStudentId) ? 'crosshair' : 'default' }}
+            >
               <Layer>
                 {classroom.walls.map(renderWall)}
                 {classroom.fixedElements.map(renderTeacherDesk)}
@@ -503,8 +702,88 @@ export default function SeatingEditor({ classroomId }: Props) {
           </div>
         </div>
 
-        {/* ── עמודה ימנית: אזור המתנה + אזהרות ── */}
+        {/* ── עמודה ימנית ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* הצעות AI */}
+          {aiProposals.length > 0 && (
+            <div style={{
+              background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+              padding: 12, boxShadow: 'var(--sh)',
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>🤖 הצעות AI — בחר אחת</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {aiProposals.map((p, i) => {
+                  const hard = p.warnings.filter((w) => w.type === 'hard').length;
+                  const soft = p.warnings.filter((w) => w.type === 'soft').length;
+                  const isActive = previewIdx === i;
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setPreviewIdx(i)}
+                      style={{
+                        background: isActive ? '#fff7ed' : 'var(--bg)',
+                        border: `1.5px solid ${isActive ? 'var(--ac)' : 'var(--bd)'}`,
+                        borderRadius: 'var(--rs)', padding: '8px 10px', cursor: 'pointer',
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}
+                    >
+                      <span style={{ fontWeight: 800, fontSize: 13 }}>הצעה {i + 1}</span>
+                      <span style={{
+                        background: p.score >= 80 ? '#16a34a' : p.score >= 60 ? '#ca8a04' : '#dc2626',
+                        color: '#fff', fontSize: 12, fontWeight: 800, padding: '2px 8px', borderRadius: 10,
+                      }}>{p.score}</span>
+                      <span style={{ fontSize: 11, color: 'var(--ink3)', flex: 1 }}>
+                        {hard} חמורות · {soft} מומלצות
+                      </span>
+                      {isActive && (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); applyProposal(i); }}
+                          style={{
+                            background: 'var(--ac)', color: '#fff', border: 'none',
+                            borderRadius: 'var(--rs)', padding: '4px 10px', fontSize: 11, fontWeight: 700,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                          }}
+                        >
+                          החל
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* הסבר שיבוץ */}
+          {placementExplanation && (
+            <div style={{
+              background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+              padding: 12, boxShadow: 'var(--sh)',
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>
+                🔍 {students.find((s) => s.id === explanationStudentId)?.name ?? ''}
+              </div>
+              {placementExplanation.seatId === null ? (
+                <div style={{ fontSize: 12, color: 'var(--ink3)' }}>⏳ ממתין לשיבוץ</div>
+              ) : placementExplanation.reasons.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--ink3)' }}>אין אילוצים מיוחדים</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {placementExplanation.reasons.map((r, i) => (
+                    <div key={i} style={{
+                      fontSize: 12,
+                      color: r.satisfied ? '#166534' : '#991b1b',
+                      background: r.satisfied ? '#f0fdf4' : '#fff1f2',
+                      borderRadius: 6, padding: '4px 8px',
+                    }}>
+                      {r.tag}: {r.note}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* אזור המתנה */}
           <div
             onClick={onParkingDrop}
@@ -528,29 +807,33 @@ export default function SeatingEditor({ classroomId }: Props) {
               style={{
                 width: '100%', padding: '6px 10px', fontSize: 13,
                 border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
-                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box',
-                marginBottom: 8,
+                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 8,
               }}
             />
-            <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
               {filteredUnassigned.length === 0 ? (
                 <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 12 }}>
                   {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
                 </div>
               ) : filteredUnassigned.map((s) => {
-                const isPicked = pickedStudentId === s.id;
+                const isP = pickedStudentId === s.id;
                 const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
                 const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
                 const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
                 return (
                   <button
                     key={s.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
+                    onDragEnd={() => setDraggedStudentId(null)}
+                    onMouseEnter={() => setHoveredStudentId(s.id)}
+                    onMouseLeave={() => setHoveredStudentId(null)}
                     onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
                     style={{
-                      background: isPicked ? '#fff7ed' : bg,
-                      color, border: isPicked ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                      background: isP ? '#fff7ed' : bg,
+                      color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
                       borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit', textAlign: 'right',
+                      cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
                     }}
                   >
                     {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
@@ -566,15 +849,13 @@ export default function SeatingEditor({ classroomId }: Props) {
             padding: 12, boxShadow: 'var(--sh)',
           }}>
             <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>
-              ⚠ התראות ({warnings.length})
+              ⚠ התראות ({displayWarnings.length})
             </div>
-            {warnings.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--gn)', fontWeight: 600 }}>
-                ✓ אין התראות. הסידור מאוזן.
-              </div>
+            {displayWarnings.length === 0 ? (
+              <div style={{ fontSize: 13, color: 'var(--gn)', fontWeight: 600 }}>✓ אין התראות. הסידור מאוזן.</div>
             ) : (
-              <div style={{ maxHeight: 220, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {warnings.map((w, i) => (
+              <div style={{ maxHeight: 200, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {displayWarnings.map((w, i) => (
                   <div key={i} style={{
                     background: w.type === 'hard' ? '#fef2f2' : '#fffbeb',
                     border: `1px solid ${w.type === 'hard' ? '#fecaca' : '#fde68a'}`,
@@ -601,22 +882,17 @@ export default function SeatingEditor({ classroomId }: Props) {
                 cursor: 'pointer', fontFamily: 'inherit',
               }}
             >
-              <span style={{ fontSize: 14, fontWeight: 800 }}>
-                📅 היסטוריה ({localHistory.length})
-              </span>
+              <span style={{ fontSize: 14, fontWeight: 800 }}>📅 היסטוריה ({localHistory.length})</span>
               <span style={{ fontSize: 12, color: 'var(--ink3)' }}>{showHistory ? '▲' : '▼'}</span>
             </button>
-
             {showHistory && (
               <div style={{ marginTop: 10 }}>
-                {/* היסטוריה מקומית */}
                 {localHistory.length === 0 && cloudHistory.length === 0 ? (
                   <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 8 }}>
                     אין סידורים שמורים עדיין
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 280, overflow: 'auto' }}>
-                    {/* סידורים שמורים מקומית */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflow: 'auto' }}>
                     {localHistory.map((arr) => (
                       <HistoryItem
                         key={arr.id}
@@ -625,7 +901,6 @@ export default function SeatingEditor({ classroomId }: Props) {
                         onRestore={() => { restore(arr.id); setShowHistory(false); setPickedStudentId(null); }}
                       />
                     ))}
-                    {/* סידורים מהענן שאינם בהיסטוריה המקומית */}
                     {cloudHistory
                       .filter((ch) => !localHistory.find((lh) => lh.id === ch.id))
                       .map((ch) => (
@@ -645,8 +920,11 @@ export default function SeatingEditor({ classroomId }: Props) {
         </div>
       </div>
     </div>
-    </div>
   );
+}
+
+function trunc(s: string, n: number) {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
 function HistoryItem({ name, date, onRestore, cloud }: {

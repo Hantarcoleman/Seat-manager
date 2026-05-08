@@ -54,7 +54,7 @@ export function generateSeatingArrangement(
   for (let i = 0; i < numCandidates; i++) {
     const rng = makeRng(baseSeed + i * 7919);
     const candidate = buildCandidate(enrichedClassroom, students, rng, options);
-    const warnings = validateAssignments(candidate, enrichedClassroom, students);
+    const warnings = validateAssignments(candidate, enrichedClassroom, students, { separateGenders: options.separateGenders });
     const score = scoreArrangement(warnings);
 
     if (score > bestScore) {
@@ -211,8 +211,17 @@ function buildCandidate(
         stu.tags.includes('distractible') &&
         (zones(seat).has('near_window') || zones(seat).has('near_door'));
 
-      if (!conflict && !distractConflict) { chosen = seat; break; }
-      if (!conflict && !chosen) chosen = seat; // fallback: ללא conflict, אבל עם הסחה
+      // הפרדת מגדרים: מעדיף לא לצרף בן ובת באותו שולחן
+      const deskOccs = deskOccupants.get(seat.deskId) ?? [];
+      const genderConflict =
+        !!(options.separateGenders && stu.gender) &&
+        deskOccs.some((oid) => {
+          const ostu = students.find((s) => s.id === oid);
+          return ostu?.gender && ostu.gender !== stu.gender;
+        });
+
+      if (!conflict && !distractConflict && !genderConflict) { chosen = seat; break; }
+      if (!conflict && !distractConflict && !chosen) chosen = seat; // fallback: ללא conflict, אבל עם הסחה
     }
     if (!chosen) chosen = freeSeats[0]; // worst-case
 

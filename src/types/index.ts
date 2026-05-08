@@ -202,7 +202,8 @@ export type ShuffleMode = 'conservative' | 'balanced' | 'full';
 
 export interface GenerateArrangementOptions {
   shuffleMode?: ShuffleMode;
-  candidates?: number;        // כמה ניסיונות (default: 50)
+  candidates?: number;
   previousArrangement?: SeatingArrangement;
   seed?: number;
+  separateGenders?: boolean;  // נסה להפריד בנים/בנות בשולחנות זוגיים
 }

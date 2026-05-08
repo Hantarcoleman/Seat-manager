@@ -7,7 +7,8 @@ const lui = (s: Student) => s.name; // alias
 export function validateAssignments(
   arr: SeatingArrangement,
   classroom: Classroom,
-  students: Student[]
+  students: Student[],
+  opts?: { separateGenders?: boolean }
 ): ArrangementWarning[] {
   const warnings: ArrangementWarning[] = [];
 
@@ -112,6 +113,14 @@ export function validateAssignments(
       warnings.push({
         type: 'soft',
         message: `💬 שני דברנים יושבים יחד: ${a.name} ו-${b.name}`,
+        studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
+      });
+    }
+
+    if (opts?.separateGenders && a.gender && b.gender && a.gender !== b.gender) {
+      warnings.push({
+        type: 'soft',
+        message: `⚡ ${a.name} ו-${b.name} יושבים יחד (בנים/בנות מעורבים)`,
         studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
       });
     }
