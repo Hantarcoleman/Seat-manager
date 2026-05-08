@@ -1,6 +1,7 @@
 // כפתורי +/- להוספה/הסרה של שולחן מטור או שורה
 import type { ReactNode } from 'react';
 import { useClassroomStore } from '../../store/classroomStore';
+import { useArrangementStore } from '../../store/arrangementStore';
 import {
   detectColumns, detectRows,
   columnAddOp, columnRemoveOp,
@@ -27,17 +28,19 @@ const REM_BTN: React.CSSProperties = { ...BTN_BASE, background: '#dc2626', color
 const DIS_BTN: React.CSSProperties = { ...BTN_BASE, background: '#d1d5db', color: '#9ca3af', cursor: 'not-allowed' };
 
 export default function DeskGridControls({ classroomId, children }: Props) {
-  const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
-  const addDesk   = useClassroomStore((s) => s.addDesk);
-  const updateDesk = useClassroomStore((s) => s.updateDesk);
-  const removeDesk = useClassroomStore((s) => s.removeDesk);
+  const classroom      = useClassroomStore((s) => s.classrooms[classroomId]);
+  const addDesk        = useClassroomStore((s) => s.addDesk);
+  const updateDesk     = useClassroomStore((s) => s.updateDesk);
+  const removeDesk     = useClassroomStore((s) => s.removeDesk);
+  const workingArr     = useArrangementStore((s) => s.workingByClassroom[classroomId]);
+  const updateAssignments = useArrangementStore((s) => s.updateAssignments);
+  const setParked      = useArrangementStore((s) => s.setParked);
 
   if (!classroom) return <>{children}</>;
 
   const columns = detectColumns(classroom.desks);
   const rows    = detectRows(classroom.desks);
-
-  const bounds = { width: classroom.width, height: classroom.height };
+  const bounds  = { width: classroom.width, height: classroom.height };
 
   const applyOp = (op: GridOperation) => {
     if (op.refused) return;
@@ -49,7 +52,22 @@ export default function DeskGridControls({ classroomId, children }: Props) {
         : [{ side: 'solo'  as const, autoZones: [] as [] }];
       addDesk(op.add, seats);
     }
-    if (op.removeId) removeDesk(op.removeId);
+    if (op.removeId) {
+      // העבר תלמידים משובצים לאזור ההמתנה לפני מחיקת השולחן
+      if (workingArr) {
+        const deskSeatIds = new Set(
+          classroom.seats.filter((s) => s.deskId === op.removeId).map((s) => s.id)
+        );
+        const displaced = workingArr.assignments
+          .filter((a) => deskSeatIds.has(a.seatId))
+          .map((a) => a.studentId);
+        if (displaced.length > 0) {
+          updateAssignments(classroomId, workingArr.assignments.filter((a) => !deskSeatIds.has(a.seatId)));
+          setParked(classroomId, [...new Set([...workingArr.parkedStudentIds, ...displaced])]);
+        }
+      }
+      removeDesk(op.removeId);
+    }
   };
 
   return (

@@ -990,20 +990,27 @@ export default function SeatingEditor({ classroomId }: Props) {
   );
 }
 
-// שם תצוגה חכם: שם פרטי לבד אם ייחודי, אחרת "שם א.", אחרת שם מלא
+// שם תצוגה חכם: שמות מאוחסנים כ"משפחה פרטי" — השם הפרטי הוא המילה האחרונה
+// אם ייחודי → שם פרטי בלבד. אם כפול → "פרטי מ." (אות ראשונה של משפחה). אם עדיין כפול → שם מלא.
 function buildDisplayName(stu: Student, allStudents: Student[]): string {
   const parts = stu.name.trim().split(/\s+/);
-  const first = parts[0] ?? '';
-  const hasDupFirst = allStudents.some((s) => s.id !== stu.id && s.name.trim().split(/\s+/)[0] === first);
+  // השם הפרטי = מילה אחרונה; שם המשפחה = שאר המילים
+  const first = parts[parts.length - 1] ?? '';
+  const familyInitial = parts.length > 1 ? parts[0][0] + '.' : '';
+
+  const hasDupFirst = allStudents.some((s) => {
+    if (s.id === stu.id) return false;
+    const sp = s.name.trim().split(/\s+/);
+    return (sp[sp.length - 1] ?? '') === first;
+  });
   if (!hasDupFirst) return first;
 
-  const lastInitial = parts[1] ? parts[1][0] + '.' : '';
-  const short = lastInitial ? `${first} ${lastInitial}` : first;
+  const short = familyInitial ? `${first} ${familyInitial}` : first;
   const hasDupShort = allStudents.some((s) => {
     if (s.id === stu.id) return false;
     const sp = s.name.trim().split(/\s+/);
-    const sf = sp[0] ?? '';
-    const si = sp[1] ? sp[1][0] + '.' : '';
+    const sf = sp[sp.length - 1] ?? '';
+    const si = sp.length > 1 ? sp[0][0] + '.' : '';
     return (si ? `${sf} ${si}` : sf) === short;
   });
 
