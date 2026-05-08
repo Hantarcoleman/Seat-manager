@@ -11,7 +11,7 @@ import { exportSeatsPdf } from '../../services/pdfExportService';
 import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncService';
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
-import type { Wall, FixedElement, Desk, Seat, ArrangementWarning, SeatingArrangement } from '../../types';
+import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
 import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -39,6 +39,8 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
   const [hoveredStudentId, setHoveredStudentId] = useState<string | null>(null);
+  const [quickAssign, setQuickAssign] = useState<{ seatId: string; x: number; y: number } | null>(null);
+  const [quickSearch, setQuickSearch] = useState('');
   const [separateGenders, setSeparateGenders] = useState(false);
   const [aiProposals, setAiProposals] = useState<SeatingArrangement[]>([]);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
@@ -141,7 +143,7 @@ export default function SeatingEditor({ classroomId }: Props) {
     for (const desk of classroom.desks) {
       const seats = classroom.seats.filter((s) => s.deskId === desk.id);
       for (const seat of seats) {
-        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -33 : 33;
+        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -38 : 38;
         const rot = (desk.rotation * Math.PI) / 180;
         map.set(seat.id, {
           x: desk.position.x + Math.cos(rot) * dx,
@@ -236,6 +238,10 @@ export default function SeatingEditor({ classroomId }: Props) {
       setPickedStudentId(null);
     } else if (occupant && !pinnedSet.has(occupant)) {
       setPickedStudentId(occupant);
+    } else if (!occupant) {
+      // כיסא ריק — פתח חיפוש מהיר
+      const pos = seatAbsolutePositions.get(seatId);
+      if (pos) { setQuickAssign({ seatId, x: pos.x, y: pos.y }); setQuickSearch(''); }
     }
   };
 
@@ -431,8 +437,8 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
-    const w = desk.seatCount === 2 ? 134 : 80;
-    const h = 76;
+    const w = desk.seatCount === 2 ? 156 : 92;
+    const h = 84;
     return (
       <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation}>
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
@@ -445,8 +451,8 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderSeat = (seat: Seat) => {
     const isSolo = seat.side === 'solo';
-    const r = isSolo ? 34 : 28;
-    const dx = isSolo ? 0 : (seat.side === 'left' ? -33 : 33);
+    const r = isSolo ? 38 : 32;
+    const dx = isSolo ? 0 : (seat.side === 'left' ? -38 : 38);
 
     const studentId = seatToStudentId.get(seat.id);
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
@@ -475,13 +481,9 @@ export default function SeatingEditor({ classroomId }: Props) {
       bgColor = '#fff'; strokeColor = '#a8a29e'; strokeW = 2;
     }
 
-    const parts = stu ? stu.name.trim().split(/\s+/) : [];
-    const line1 = trunc(parts[0] ?? '', isSolo ? 9 : 7);
-    const line2 = trunc(parts.slice(1).join(' '), isSolo ? 9 : 7);
-    const fontSize = isSolo ? 10 : 9;
-    const lineH = fontSize + 2;
-    const textW = Math.round(r * 1.6);
-    const textStartY = -Math.round(lineH);
+    const displayName = stu ? buildDisplayName(stu, students) : '';
+    const fontSize = stu ? calcNameFontSize(displayName, r) : 10;
+    const textW = Math.round(r * 1.85);
     const pinOff = Math.round(r * 0.68);
     const pinR = 9;
     const textColor = stu
@@ -508,22 +510,20 @@ export default function SeatingEditor({ classroomId }: Props) {
           onDragEnd={(e: any) => onKonvaDragEnd(e, seat.id, dx)}
         />
         {stu && (
-          <>
-            <Text
-              x={dx - textW / 2} y={textStartY - lineH / 2}
-              width={textW} align="center"
-              text={line1} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
-              listening={false}
-            />
-            {line2 && (
-              <Text
-                x={dx - textW / 2} y={textStartY - lineH / 2 + lineH + 2}
-                width={textW} align="center"
-                text={line2} fontSize={fontSize} fontFamily="Heebo" fill={textColor}
-                listening={false}
-              />
-            )}
-          </>
+          <Text
+            x={dx - textW / 2} y={-fontSize / 2 - 1}
+            width={textW} align="center"
+            text={displayName} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+            listening={false}
+          />
+        )}
+        {!stu && !activeSeatQualityStudentId && (
+          <Text
+            x={dx - 8} y={-9}
+            width={16} align="center"
+            text="+" fontSize={16} fontFamily="Heebo" fill="#c4bdb9"
+            listening={false}
+          />
         )}
         {stu && (
           <>
@@ -702,6 +702,70 @@ export default function SeatingEditor({ classroomId }: Props) {
                   {classroom.desks.map(renderDesk)}
                 </Layer>
               </Stage>
+
+              {/* שיבוץ מהיר — נפתח בלחיצה על כיסא ריק */}
+              {quickAssign && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: Math.min(quickAssign.x - 70, classroom.width - 168),
+                    top: Math.max(4, quickAssign.y - 90),
+                    zIndex: 200,
+                    background: '#fff',
+                    border: '1.5px solid var(--bd)',
+                    borderRadius: 10,
+                    boxShadow: '0 4px 20px rgba(0,0,0,.18)',
+                    padding: 8,
+                    minWidth: 164,
+                    direction: 'rtl',
+                  }}
+                >
+                  <input
+                    autoFocus
+                    value={quickSearch}
+                    onChange={(e) => setQuickSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') { setQuickAssign(null); setQuickSearch(''); }
+                    }}
+                    onBlur={() => setTimeout(() => { setQuickAssign(null); setQuickSearch(''); }, 150)}
+                    placeholder="🔍 שם תלמיד..."
+                    style={{
+                      width: '100%', padding: '5px 8px', fontSize: 13,
+                      border: '1px solid var(--bd)', borderRadius: 6,
+                      fontFamily: 'inherit', direction: 'rtl',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{ maxHeight: 148, overflowY: 'auto', marginTop: 4 }}>
+                    {unassigned
+                      .filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim()))
+                      .slice(0, 8)
+                      .map((s) => (
+                        <div
+                          key={s.id}
+                          onMouseDown={(e) => { e.preventDefault(); }}
+                          onClick={() => {
+                            assignToSeat(quickAssign.seatId, s.id);
+                            setQuickAssign(null);
+                            setQuickSearch('');
+                          }}
+                          style={{
+                            padding: '5px 8px', cursor: 'pointer', fontSize: 13,
+                            borderRadius: 5,
+                          }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#f3f4f6'; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                        >
+                          {buildDisplayName(s, students)}
+                        </div>
+                      ))
+                    }
+                    {unassigned.filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim())).length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--ink3)', padding: '5px 8px' }}>אין תוצאות</div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </DeskGridControls>
         </div>
@@ -926,8 +990,33 @@ export default function SeatingEditor({ classroomId }: Props) {
   );
 }
 
-function trunc(s: string, n: number) {
-  return s.length > n ? s.slice(0, n - 1) + '…' : s;
+// שם תצוגה חכם: שם פרטי לבד אם ייחודי, אחרת "שם א.", אחרת שם מלא
+function buildDisplayName(stu: Student, allStudents: Student[]): string {
+  const parts = stu.name.trim().split(/\s+/);
+  const first = parts[0] ?? '';
+  const hasDupFirst = allStudents.some((s) => s.id !== stu.id && s.name.trim().split(/\s+/)[0] === first);
+  if (!hasDupFirst) return first;
+
+  const lastInitial = parts[1] ? parts[1][0] + '.' : '';
+  const short = lastInitial ? `${first} ${lastInitial}` : first;
+  const hasDupShort = allStudents.some((s) => {
+    if (s.id === stu.id) return false;
+    const sp = s.name.trim().split(/\s+/);
+    const sf = sp[0] ?? '';
+    const si = sp[1] ? sp[1][0] + '.' : '';
+    return (si ? `${sf} ${si}` : sf) === short;
+  });
+
+  if (!hasDupShort) return short;
+  return stu.name.trim();
+}
+
+// גודל פונט מקסימלי שמתאים לרדיוס ואורך השם
+function calcNameFontSize(name: string, r: number): number {
+  const availW = r * 1.75;
+  // כל תו עברי רוחבו ≈ fontSize * 0.6
+  const byWidth = availW / (Math.max(1, name.length) * 0.58);
+  return Math.max(9, Math.min(17, Math.floor(byWidth)));
 }
 
 function HistoryItem({ name, date, onRestore, cloud }: {
