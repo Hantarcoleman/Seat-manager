@@ -11,7 +11,18 @@ export interface GridOperation {
   updates: { id: string; position: { x: number; y: number } }[];
   add?: Omit<Desk, 'id'>;
   removeId?: string;
+  refused?: boolean;  // אין מקום — הפעולה נדחתה
 }
+
+export interface ClassroomBounds {
+  width: number;
+  height: number;
+}
+
+// שוליים מינימליים מקצה הכיתה למרכז שולחן (px)
+const DESK_MARGIN = 80;
+// מרווח מינימלי בין שולחנות — לא נדחס מתחת לזה
+const MIN_GAP = 60;
 
 const TOLERANCE = 50;
 
@@ -69,19 +80,28 @@ function calcMedianGap(desks: Desk[], axis: 'x' | 'y'): number {
   return gaps[Math.floor(gaps.length / 2)];
 }
 
-// הוספת שולחן לטור — מוסיף בסוף (y מקסימלי + gap), מרווח אחיד
-export function columnAddOp(group: DeskGroup): GridOperation {
-  const { desks, gap, mainAxis } = group;
+// הוספת שולחן לטור — מוסיף בסוף, מרווח אחיד. אם אין מקום — מכווץ פערים.
+export function columnAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
+  const { desks, mainAxis } = group;
+  const n = desks.length;
   const minY = desks[0].position.y;
   const ref = desks[0];
+  const maxY = bounds.height - DESK_MARGIN;
+
+  // חשב gap שמתאים ל-n+1 שולחנות בתוך הגבול
+  let gap = group.gap;
+  if (minY + n * gap > maxY) {
+    gap = (maxY - minY) / n;
+    if (gap < MIN_GAP) return { updates: [], refused: true };
+  }
 
   const updates = desks.map((d, i) => ({
     id: d.id,
-    position: { x: mainAxis, y: minY + i * gap },
+    position: { x: mainAxis, y: Math.round(minY + i * gap) },
   }));
 
   const add: Omit<Desk, 'id'> = {
-    position: { x: mainAxis, y: minY + desks.length * gap },
+    position: { x: mainAxis, y: Math.round(minY + n * gap) },
     rotation: ref.rotation,
     seatCount: ref.seatCount,
     ...(ref.layoutGroup ? { layoutGroup: ref.layoutGroup } : {}),
@@ -106,19 +126,27 @@ export function columnRemoveOp(group: DeskGroup): GridOperation {
   return { updates, removeId };
 }
 
-// הוספת שולחן לשורה — מוסיף בסוף (x מקסימלי + gap), מרווח אחיד
-export function rowAddOp(group: DeskGroup): GridOperation {
-  const { desks, gap, mainAxis } = group;
+// הוספת שולחן לשורה — מוסיף בסוף, מרווח אחיד. אם אין מקום — מכווץ פערים.
+export function rowAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
+  const { desks, mainAxis } = group;
+  const n = desks.length;
   const minX = desks[0].position.x;
   const ref = desks[0];
+  const maxX = bounds.width - DESK_MARGIN;
+
+  let gap = group.gap;
+  if (minX + n * gap > maxX) {
+    gap = (maxX - minX) / n;
+    if (gap < MIN_GAP) return { updates: [], refused: true };
+  }
 
   const updates = desks.map((d, i) => ({
     id: d.id,
-    position: { x: minX + i * gap, y: mainAxis },
+    position: { x: Math.round(minX + i * gap), y: mainAxis },
   }));
 
   const add: Omit<Desk, 'id'> = {
-    position: { x: minX + desks.length * gap, y: mainAxis },
+    position: { x: Math.round(minX + n * gap), y: mainAxis },
     rotation: ref.rotation,
     seatCount: ref.seatCount,
     ...(ref.layoutGroup ? { layoutGroup: ref.layoutGroup } : {}),
