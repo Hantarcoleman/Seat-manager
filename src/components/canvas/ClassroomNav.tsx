@@ -6,10 +6,9 @@ interface Props {
 }
 
 const TABS = [
-  { path: 'setup',    label: '🏗 מבנה הכיתה' },
-  { path: 'desks',    label: '🪑 שולחנות'    },
-  { path: 'students', label: '👥 תלמידים'    },
-  { path: 'seating',  label: '✨ סידור'      },
+  { path: 'setup',    label: '🏗 כיתה ושולחנות' },
+  { path: 'students', label: '👥 תלמידים'       },
+  { path: 'seating',  label: '✨ סידור'         },
 ];
 
 export default function ClassroomNav({ classroomId, classroomName }: Props) {

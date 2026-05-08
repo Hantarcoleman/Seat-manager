@@ -1,7 +1,6 @@
 import { HashRouter, Routes, Route, Link } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
-import DeskLayoutPage from './pages/DeskLayoutPage';
 import StudentsPage from './pages/StudentsPage';
 import SeatingPage from './pages/SeatingPage';
 import LoginPage from './components/auth/LoginPage';
@@ -66,7 +65,6 @@ function AppShell() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/classroom/:id/setup" element={<ClassroomSetup />} />
-          <Route path="/classroom/:id/desks" element={<DeskLayoutPage />} />
           <Route path="/classroom/:id/students" element={<StudentsPage />} />
           <Route path="/classroom/:id/seating" element={<SeatingPage />} />
         </Routes>

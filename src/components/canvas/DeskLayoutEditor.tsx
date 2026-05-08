@@ -4,6 +4,7 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import type { Wall, FixedElement, Point, Desk, Seat, ZoneTag } from '../../types';
 import { computeAllAutoZones } from '../../services/zoneCalculator';
+import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -599,39 +600,41 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           : '💡 לחץ על המקום בקנבס להצבת התבנית. לאחר ההצבה — גרור שולחן להזיז.'}
       </div>
 
-      <div style={{
-        background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
-        overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
-      }}>
-        <Stage
-          ref={stageRef}
-          width={classroom.width}
-          height={classroom.height}
-          onMouseDown={onStageMouseDown}
-          onMouseUp={onStageMouseUp}
-          onClick={onStageClick}
-          onTap={onStageClick}
-          onMouseMove={onStageMouseMove}
-          style={{ cursor: isSelectMode ? 'default' : 'crosshair', background: '#fff' }}
-        >
-          <Layer listening={false}>{renderGrid()}</Layer>
-          <Layer>
-            {classroom.walls.map(renderWall)}
-            {classroom.fixedElements.map(renderTeacherDesk)}
-            {classroom.desks.map(renderDesk)}
-            {renderPreview()}
-            {renderRubberBand()}
-          </Layer>
-        </Stage>
-
+      <DeskGridControls classroomId={classroomId}>
         <div style={{
-          position: 'absolute', bottom: 6, left: 12, fontSize: 11, color: 'var(--ink3)',
-          background: 'rgba(255,255,255,.85)', padding: '2px 8px', borderRadius: 4,
+          background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
+          overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
         }}>
-          {mousePos.x},{mousePos.y}
-          {selectedIds.size > 0 && ` · ${selectedIds.size} נבחרו`}
+          <Stage
+            ref={stageRef}
+            width={classroom.width}
+            height={classroom.height}
+            onMouseDown={onStageMouseDown}
+            onMouseUp={onStageMouseUp}
+            onClick={onStageClick}
+            onTap={onStageClick}
+            onMouseMove={onStageMouseMove}
+            style={{ cursor: isSelectMode ? 'default' : 'crosshair', background: '#fff' }}
+          >
+            <Layer listening={false}>{renderGrid()}</Layer>
+            <Layer>
+              {classroom.walls.map(renderWall)}
+              {classroom.fixedElements.map(renderTeacherDesk)}
+              {classroom.desks.map(renderDesk)}
+              {renderPreview()}
+              {renderRubberBand()}
+            </Layer>
+          </Stage>
+
+          <div style={{
+            position: 'absolute', bottom: 6, left: 12, fontSize: 11, color: 'var(--ink3)',
+            background: 'rgba(255,255,255,.85)', padding: '2px 8px', borderRadius: 4,
+          }}>
+            {mousePos.x},{mousePos.y}
+            {selectedIds.size > 0 && ` · ${selectedIds.size} נבחרו`}
+          </div>
         </div>
-      </div>
+      </DeskGridControls>
     </div>
   );
 }

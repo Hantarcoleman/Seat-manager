@@ -12,6 +12,7 @@ import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncSer
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, ArrangementWarning, SeatingArrangement } from '../../types';
+import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -681,26 +682,28 @@ export default function SeatingEditor({ classroomId }: Props) {
                 : '💡 לחץ/גרור תלמיד מרשימת ההמתנה · לחץ על מושב תפוס להזזה · דאבל-קליק להסרה'}
           </div>
 
-          <div
-            style={{
-              background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
-              overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
-            }}
-            onDragOver={onCanvasDragOver}
-            onDrop={onCanvasDrop}
-          >
-            <Stage
-              ref={stageRef}
-              width={classroom.width} height={classroom.height}
-              style={{ background: '#fff', cursor: (pickedStudentId || draggedStudentId) ? 'crosshair' : 'default' }}
+          <DeskGridControls classroomId={classroomId}>
+            <div
+              style={{
+                background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
+                overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
+              }}
+              onDragOver={onCanvasDragOver}
+              onDrop={onCanvasDrop}
             >
-              <Layer>
-                {classroom.walls.map(renderWall)}
-                {classroom.fixedElements.map(renderTeacherDesk)}
-                {classroom.desks.map(renderDesk)}
-              </Layer>
-            </Stage>
-          </div>
+              <Stage
+                ref={stageRef}
+                width={classroom.width} height={classroom.height}
+                style={{ background: '#fff', cursor: (pickedStudentId || draggedStudentId) ? 'crosshair' : 'default' }}
+              >
+                <Layer>
+                  {classroom.walls.map(renderWall)}
+                  {classroom.fixedElements.map(renderTeacherDesk)}
+                  {classroom.desks.map(renderDesk)}
+                </Layer>
+              </Stage>
+            </div>
+          </DeskGridControls>
         </div>
 
         {/* ── עמודה ימנית ── */}

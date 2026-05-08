@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useClassroomStore } from '../store/classroomStore';
 import RoomEditor from '../components/canvas/RoomEditor';
+import DeskLayoutEditor from '../components/canvas/DeskLayoutEditor';
 import ClassroomNav from '../components/canvas/ClassroomNav';
 
 export default function ClassroomSetup() {
@@ -36,6 +37,9 @@ export default function ClassroomSetup() {
     <div>
       <ClassroomNav classroomId={classroom.id} classroomName={classroom.name} />
       <RoomEditor classroomId={classroom.id} />
+      <div style={{ marginTop: 32 }}>
+        <DeskLayoutEditor classroomId={classroom.id} />
+      </div>
     </div>
   );
 }
