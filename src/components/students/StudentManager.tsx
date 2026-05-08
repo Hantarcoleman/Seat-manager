@@ -28,6 +28,7 @@ export default function StudentManager({ classroomId }: Props) {
   const [filterTag, setFilterTag] = useState<StudentTag | ''>('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'characterized' | 'pending'>('all');
   const [tagMode, setTagMode] = useState<StudentTag | null>(null); // מצב סימון לפי מאפיין
+  const [tagSearch, setTagSearch] = useState(''); // חיפוש שם במצב מאפיין
 
   const characterizedCount = useMemo(() => students.filter(isCharacterized).length, [students]);
 
@@ -94,8 +95,9 @@ export default function StudentManager({ classroomId }: Props) {
   if (tagMode) {
     const studentsWithTag = students.filter((s) => s.tags.includes(tagMode));
     const studentsWithout = students.filter((s) => !s.tags.includes(tagMode));
-    // מיין: עם המאפיין קודם
-    const sorted = [...studentsWithTag, ...studentsWithout];
+    // מיין: עם המאפיין קודם, ואז סנן לפי חיפוש שם
+    const sorted = [...studentsWithTag, ...studentsWithout]
+      .filter((s) => !tagSearch.trim() || s.name.includes(tagSearch.trim()));
 
     return (
       <div>
@@ -119,8 +121,20 @@ export default function StudentManager({ classroomId }: Props) {
           }}>
             {activeTagCount} תלמידים
           </span>
+          <input
+            type="text"
+            value={tagSearch}
+            onChange={(e) => setTagSearch(e.target.value)}
+            placeholder="🔍 חיפוש שם..."
+            autoFocus
+            style={{
+              padding: '7px 12px', fontSize: 13, width: 160,
+              border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+              fontFamily: 'inherit', direction: 'rtl',
+            }}
+          />
           <button
-            onClick={() => setTagMode(null)}
+            onClick={() => { setTagMode(null); setTagSearch(''); }}
             style={{
               background: 'var(--bg2)', border: '1.5px solid var(--bd)',
               borderRadius: 'var(--rs)', padding: '7px 16px',
@@ -190,7 +204,7 @@ export default function StudentManager({ classroomId }: Props) {
               return (
                 <button
                   key={t}
-                  onClick={() => setTagMode(t)}
+                  onClick={() => { setTagMode(t); setTagSearch(''); }}
                   style={{
                     background: isActive ? 'var(--ac)' : 'var(--bg2)',
                     color: isActive ? '#fff' : 'var(--ink)',
