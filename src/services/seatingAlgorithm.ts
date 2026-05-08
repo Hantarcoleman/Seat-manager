@@ -143,31 +143,47 @@ function buildCandidate(
     if (seat) assign(seat.id, stu.id);
   }
 
-  // ── שלב 5: זוגות preferredNear הדדיים → אותו שולחן זוגי ──
+  // ── שלב 5: VIP Match — שני תלמידי אחריות גבוהה (≥85) שלפחות אחד ביקש לשבת ליד השני ──
+  // שוקל עדיפות עליונה לפני כל שאר הזוגות
   const remaining = students.filter((s) => !usedStudentIds.has(s.id));
   const remainingSet = new Set(remaining.map((s) => s.id));
   const pairedIds = new Set<string>();
 
   // שולחנות זוגיים פנויים לחלוטין
-  const freePairDesks = shuffle(
+  const getPairDesks = () =>
     classroom.desks.filter((d) => {
       if (d.seatCount !== 2) return false;
       const ds = seats.filter((s) => s.deskId === d.id);
       return ds.length === 2 && !usedSeatIds.has(ds[0].id) && !usedSeatIds.has(ds[1].id);
-    }),
-    rng
-  );
+    });
 
+  // VIP: שניהם אחריות גבוהה ולפחות אחד מבקש לשבת ליד השני
+  const highResp = remaining.filter((s) => s.responsibilityScore >= 85);
+  for (const a of highResp) {
+    if (pairedIds.has(a.id)) continue;
+    for (const b of highResp) {
+      if (b.id === a.id || pairedIds.has(b.id)) continue;
+      const aWantsB = a.preferredNear.includes(b.id);
+      const bWantsA = b.preferredNear.includes(a.id);
+      if (!(aWantsB || bWantsA)) continue;
+      if (a.avoidNear.includes(b.id) || b.avoidNear.includes(a.id)) continue;
+      const desk = getPairDesks()[0];
+      if (!desk) break;
+      const ds = seats.filter((s) => s.deskId === desk.id);
+      assign(ds[0].id, a.id); assign(ds[1].id, b.id);
+      pairedIds.add(a.id); pairedIds.add(b.id);
+      break;
+    }
+  }
+
+  // שלב 5ב: זוגות preferredNear הדדיים רגילים → אותו שולחן זוגי
   for (const stu of shuffle(remaining, rng)) {
-    if (pairedIds.has(stu.id)) continue;
+    if (pairedIds.has(stu.id) || usedStudentIds.has(stu.id)) continue;
     for (const bId of stu.preferredNear) {
-      if (!remainingSet.has(bId) || pairedIds.has(bId) || bId === stu.id) continue;
+      if (!remainingSet.has(bId) || pairedIds.has(bId) || usedStudentIds.has(bId) || bId === stu.id) continue;
       const b = remaining.find((s) => s.id === bId);
       if (!b || stu.avoidNear.includes(b.id) || b.avoidNear.includes(stu.id)) continue;
-      const desk = freePairDesks.find((d) => {
-        const ds = seats.filter((s) => s.deskId === d.id);
-        return !usedSeatIds.has(ds[0].id) && !usedSeatIds.has(ds[1].id);
-      });
+      const desk = getPairDesks()[0];
       if (!desk) break;
       const ds = seats.filter((s) => s.deskId === desk.id);
       assign(ds[0].id, stu.id);
@@ -231,10 +247,83 @@ function buildCandidate(
     deskOccupants.set(chosen.deskId, [...cur, stu.id]);
   }
 
-  // ── שלב 7 (conservative mode): שמור תלמידים נעוצים ממקומם ──
+  // ── שלב 7: הפרדת דברנים — לא שני דברנים באותו שולחן ──
+  const seatToStudentId = new Map<string, string>(assignments.map((a) => [a.seatId, a.studentId]));
+  const studentIdToSeatId = new Map<string, string>(assignments.map((a) => [a.studentId, a.seatId]));
+
+  for (const desk of classroom.desks) {
+    if (desk.seatCount !== 2) continue;
+    const ds = seats.filter((s) => s.deskId === desk.id);
+    if (ds.length < 2) continue;
+    const idA = seatToStudentId.get(ds[0].id);
+    const idB = seatToStudentId.get(ds[1].id);
+    if (!idA || !idB) continue;
+    const stuA = students.find((s) => s.id === idA);
+    const stuB = students.find((s) => s.id === idB);
+    if (!stuA?.tags.includes('talkative') || !stuB?.tags.includes('talkative')) continue;
+    // שני דברנים באותו שולחן — החלף את stuB עם תלמיד שאינו דברן בשולחן אחר
+    const swapTarget = assignments.find((a) => {
+      const s = students.find((x) => x.id === a.studentId);
+      if (!s || s.tags.includes('talkative') || s.id === idA || s.id === idB) return false;
+      const targetSeat = seats.find((x) => x.id === a.seatId);
+      if (!targetSeat || targetSeat.deskId === desk.id) return false;
+      // לא תלמיד עם needs_front / better_alone
+      if (s.tags.includes('needs_front') || s.tags.includes('better_alone')) return false;
+      return true;
+    });
+    if (!swapTarget) continue;
+    // החלף
+    const swapSeatId = swapTarget.seatId;
+    const swapStudentId = swapTarget.studentId;
+    const bSeatId = studentIdToSeatId.get(idB)!;
+    swapTarget.seatId = bSeatId;
+    const bAssign = assignments.find((a) => a.studentId === idB);
+    if (bAssign) bAssign.seatId = swapSeatId;
+    seatToStudentId.set(bSeatId, swapStudentId);
+    seatToStudentId.set(swapSeatId, idB);
+    studentIdToSeatId.set(swapStudentId, bSeatId);
+    studentIdToSeatId.set(idB, swapSeatId);
+  }
+
+  // ── שלב 8: אזור שקט — דברנים לא ליד תלמידי אחריות גבוהה (≥85) ──
+  for (const desk of classroom.desks) {
+    if (desk.seatCount !== 2) continue;
+    const ds = seats.filter((s) => s.deskId === desk.id);
+    if (ds.length < 2) continue;
+    const idA = seatToStudentId.get(ds[0].id);
+    const idB = seatToStudentId.get(ds[1].id);
+    if (!idA || !idB) continue;
+    const stuA = students.find((s) => s.id === idA);
+    const stuB = students.find((s) => s.id === idB);
+    if (!stuA || !stuB) continue;
+    const talker = stuA.tags.includes('talkative') ? stuA : stuB.tags.includes('talkative') ? stuB : null;
+    const highR = (stuA.responsibilityScore ?? 70) >= 85 ? stuA : (stuB.responsibilityScore ?? 70) >= 85 ? stuB : null;
+    if (!talker || !highR) continue;
+    // דברן ליד תלמיד אחריות גבוהה — החלף את הדברן
+    const swapTarget = assignments.find((a) => {
+      const s = students.find((x) => x.id === a.studentId);
+      if (!s || s.tags.includes('talkative') || s.id === talker.id || s.id === highR.id) return false;
+      const targetSeat = seats.find((x) => x.id === a.seatId);
+      if (!targetSeat || targetSeat.deskId === desk.id) return false;
+      if (s.tags.includes('needs_front') || s.tags.includes('better_alone')) return false;
+      if ((s.responsibilityScore ?? 70) >= 85) return false;
+      return true;
+    });
+    if (!swapTarget) continue;
+    const talkerSeatId = studentIdToSeatId.get(talker.id)!;
+    const swapSeatId = swapTarget.seatId;
+    const swapStudentId = swapTarget.studentId;
+    swapTarget.seatId = talkerSeatId;
+    const talkerAssign = assignments.find((a) => a.studentId === talker.id);
+    if (talkerAssign) talkerAssign.seatId = swapSeatId;
+    seatToStudentId.set(talkerSeatId, swapStudentId);
+    seatToStudentId.set(swapSeatId, talker.id);
+    studentIdToSeatId.set(swapStudentId, talkerSeatId);
+    studentIdToSeatId.set(talker.id, swapSeatId);
+  }
+
+  // ── שלב 9 (conservative mode): שמור תלמידים נעוצים ממקומם ──
   if (options.shuffleMode === 'conservative' && options.previousArrangement) {
-    // החזר תלמידים שכבר היו במקום ולא עברו (אם המושב עדיין פנוי)
-    // זה רק מגביל ה-shuffle ע"י seed שמור — לא ממש lock
     // TODO: implement proper lock of N% of students
   }
 
