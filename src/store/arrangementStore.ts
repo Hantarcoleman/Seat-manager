@@ -6,14 +6,17 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 
 interface ArrangementState {
   saved: Record<string, SeatingArrangement>;
-  // הסידור הפעיל הנוכחי לפי classroomId — בעבודה לפני שמירה רשמית
   workingByClassroom: Record<string, SeatingArrangement | undefined>;
+  // תלמידים נעוצים לפי classroomId — לא יוזזו ע"י AI או החלפה
+  pinnedByClassroom: Record<string, string[]>;
 
   // ── עבודה על סידור פעיל ──
   setWorking: (classroomId: string, arr: SeatingArrangement | undefined) => void;
   updateAssignments: (classroomId: string, assignments: SeatAssignment[]) => void;
   setParked: (classroomId: string, ids: string[]) => void;
   setScoreAndWarnings: (classroomId: string, score: number, warnings: ArrangementWarning[]) => void;
+  togglePin: (classroomId: string, studentId: string) => void;
+  clearPins: (classroomId: string) => void;
 
   // ── שמירה / שחזור ──
   saveCurrent: (classroomId: string, name: string) => string | null;
@@ -29,6 +32,7 @@ export const useArrangementStore = create<ArrangementState>()(
     (set, get) => ({
       saved: {},
       workingByClassroom: {},
+      pinnedByClassroom: {},
 
       setWorking: (classroomId, arr) =>
         set((s) => ({ workingByClassroom: { ...s.workingByClassroom, [classroomId]: arr } })),
@@ -68,6 +72,18 @@ export const useArrangementStore = create<ArrangementState>()(
             },
           };
         }),
+
+      togglePin: (classroomId, studentId) =>
+        set((s) => {
+          const cur = s.pinnedByClassroom[classroomId] ?? [];
+          const next = cur.includes(studentId)
+            ? cur.filter((id) => id !== studentId)
+            : [...cur, studentId];
+          return { pinnedByClassroom: { ...s.pinnedByClassroom, [classroomId]: next } };
+        }),
+
+      clearPins: (classroomId) =>
+        set((s) => ({ pinnedByClassroom: { ...s.pinnedByClassroom, [classroomId]: [] } })),
 
       saveCurrent: (classroomId, name) => {
         const cur = get().workingByClassroom[classroomId];

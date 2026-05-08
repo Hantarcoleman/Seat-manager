@@ -25,6 +25,10 @@ export default function SeatingEditor({ classroomId }: Props) {
   const working = useArrangementStore((s) => s.workingByClassroom[classroomId]);
   const setWorking = useArrangementStore((s) => s.setWorking);
   const updateAssignments = useArrangementStore((s) => s.updateAssignments);
+  const pinnedStudentIds = useArrangementStore((s) => s.pinnedByClassroom[classroomId] ?? []);
+  const togglePin = useArrangementStore((s) => s.togglePin);
+  const clearPins = useArrangementStore((s) => s.clearPins);
+  const pinnedSet = useMemo(() => new Set(pinnedStudentIds), [pinnedStudentIds]);
 
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
@@ -70,6 +74,12 @@ export default function SeatingEditor({ classroomId }: Props) {
     return unassigned.filter((s) => s.name.includes(search.trim()));
   }, [unassigned, search]);
 
+  const aloneCount = useMemo(
+    () => students.filter((s) => s.tags.includes('better_alone')).length,
+    [students]
+  );
+  const availableSeats = classroom ? classroom.seats.length - assignments.length : 0;
+
   const warnings = useMemo(() => {
     if (!working || !classroom) return [] as ArrangementWarning[];
     return validateAssignments(working, classroom, students);
@@ -100,12 +110,36 @@ export default function SeatingEditor({ classroomId }: Props) {
   const onSeatClick = (seatId: string) => {
     const occupant = seatToStudentId.get(seatId);
     if (pickedStudentId) {
-      // יש תלמיד נבחר — אם המקום פנוי, השב אותו; אם תפוס, החלף
-      assignToSeat(seatId, pickedStudentId);
+      if (pinnedSet.has(pickedStudentId)) { setPickedStudentId(null); return; }
+      const pickedSeat = studentToSeatId.get(pickedStudentId);
+      if (occupant && occupant !== pickedStudentId) {
+        // החלפת מקומות בין שני תלמידים יושבים
+        if (pinnedSet.has(occupant)) { setPickedStudentId(null); return; }
+        if (pickedSeat) {
+          const next = assignments.map((a) => {
+            if (a.studentId === pickedStudentId) return { seatId, studentId: pickedStudentId };
+            if (a.seatId === seatId) return { seatId: pickedSeat, studentId: occupant };
+            return a;
+          });
+          updateAssignments(classroomId, next);
+        } else {
+          assignToSeat(seatId, pickedStudentId);
+        }
+      } else {
+        assignToSeat(seatId, pickedStudentId);
+      }
       setPickedStudentId(null);
-    } else if (occupant) {
-      // אין נבחר ולחצנו על תלמיד תפוס — בחר אותו להזזה
+    } else if (occupant && !pinnedSet.has(occupant)) {
       setPickedStudentId(occupant);
+    }
+  };
+
+  // דאבל קליק על מושב תפוס — החזר תלמיד לרשימת ההמתנה
+  const onSeatDblClick = (seatId: string) => {
+    const occupant = seatToStudentId.get(seatId);
+    if (occupant && !pinnedSet.has(occupant)) {
+      removeFromSeat(seatId);
+      setPickedStudentId(null);
     }
   };
 
@@ -130,18 +164,30 @@ export default function SeatingEditor({ classroomId }: Props) {
     if (assignments.length === 0) return;
     if (!confirm(`לנקות את כל ${assignments.length} השיבוצים?`)) return;
     updateAssignments(classroomId, []);
+    clearPins(classroomId);
     setPickedStudentId(null);
   };
 
-  // יצירת סידור AI — מריץ 60 ניסיונות ובוחר הטוב ביותר לפי אילוצי תלמידים
+  // יצירת סידור AI — מריץ 60 ניסיונות, שומר תלמידים נעוצים במקומם
   const generateWithAI = () => {
     if (students.length === 0 || classroom.seats.length === 0) return;
     setGenerating(true);
-    // setTimeout כדי לאפשר ל-UI להתעדכן לפני החישוב הכבד
     setTimeout(() => {
       try {
-        const result = generateSeatingArrangement(classroom, students, { candidates: 60 });
-        updateAssignments(classroomId, result.assignments);
+        // תלמידים נעוצים — שמור את שיבוציהם הנוכחיים
+        const pinnedAssignments = assignments.filter((a) => pinnedSet.has(a.studentId));
+        const pinnedSeatIds = new Set(pinnedAssignments.map((a) => a.seatId));
+        const pinnedStudIds = new Set(pinnedAssignments.map((a) => a.studentId));
+
+        // הרץ AI רק על תלמידים ומושבים שאינם נעוצים
+        const freeStudents = students.filter((s) => !pinnedStudIds.has(s.id));
+        const freeClassroom = {
+          ...classroom,
+          seats: classroom.seats.filter((s) => !pinnedSeatIds.has(s.id)),
+        };
+
+        const result = generateSeatingArrangement(freeClassroom, freeStudents, { candidates: 60 });
+        updateAssignments(classroomId, [...pinnedAssignments, ...result.assignments]);
         setPickedStudentId(null);
       } finally {
         setGenerating(false);
@@ -197,18 +243,16 @@ export default function SeatingEditor({ classroomId }: Props) {
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
     const isPicked = pickedStudentId && studentId === pickedStudentId;
     const isFlagged = flaggedSeatIds.has(seat.id);
+    const isPinned = studentId ? pinnedSet.has(studentId) : false;
 
-    // צבע לפי מין
     const bgColor = stu
       ? (stu.gender === 'm' ? '#dbeafe' : stu.gender === 'f' ? '#fce7f3' : '#fff')
       : '#fff';
     const textColor = stu
       ? (stu.gender === 'm' ? '#1d4ed8' : stu.gender === 'f' ? '#be185d' : '#1c1917')
       : '#a8a29e';
-    const strokeColor = isPicked ? '#ea580c' : isFlagged ? '#dc2626' : (stu ? '#16a34a' : '#a8a29e');
-    const strokeW = isPicked || isFlagged ? 3 : 2;
-
-    // טקסט שם — חיתוך אם ארוך
+    const strokeColor = isPicked ? '#ea580c' : isPinned ? '#7c3aed' : isFlagged ? '#dc2626' : (stu ? '#16a34a' : '#a8a29e');
+    const strokeW = isPicked || isFlagged || isPinned ? 3 : 2;
     const displayName = stu ? (stu.name.length > 11 ? stu.name.slice(0, 10) + '…' : stu.name) : '';
 
     return (
@@ -219,6 +263,8 @@ export default function SeatingEditor({ classroomId }: Props) {
           listening={true}
           onClick={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
           onTap={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
+          onDblClick={(e) => { e.cancelBubble = true; onSeatDblClick(seat.id); }}
+          onDblTap={(e) => { e.cancelBubble = true; onSeatDblClick(seat.id); }}
         />
         {stu && (
           <Text
@@ -229,12 +275,55 @@ export default function SeatingEditor({ classroomId }: Props) {
             listening={false}
           />
         )}
+        {/* כפתור נעיצה — מוצג רק כשיש תלמיד במושב */}
+        {stu && (
+          <Circle
+            x={dx + 16} y={-16} radius={9}
+            fill={isPinned ? '#7c3aed' : '#e2e8f0'}
+            stroke={isPinned ? '#5b21b6' : '#94a3b8'}
+            strokeWidth={1}
+            listening={true}
+            onClick={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
+            onTap={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
+          />
+        )}
+        {stu && (
+          <Text
+            x={dx + 7} y={-25}
+            width={18} align="center"
+            text="📌"
+            fontSize={isPinned ? 9 : 8}
+            listening={false}
+          />
+        )}
       </Group>
     );
   };
 
   return (
     <div>
+      {/* פס סטטיסטיקה */}
+      <div style={{
+        display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12,
+        background: 'var(--bg2)', border: '1px solid var(--bd)',
+        borderRadius: 'var(--rs)', padding: '8px 14px',
+      }}>
+        {[
+          { label: 'מקומות פנויים', value: availableSeats, color: availableSeats > 0 ? '#0284c7' : '#16a34a' },
+          { label: 'ממתינים לשיבוץ', value: unassigned.length, color: unassigned.length > 0 ? '#ca8a04' : '#16a34a' },
+          { label: 'כדאי לבד', value: aloneCount, color: '#7c3aed' },
+          { label: 'נעוצים', value: pinnedStudentIds.length, color: '#7c3aed' },
+        ].map((stat) => (
+          <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{
+              background: stat.color, color: '#fff', borderRadius: 10,
+              padding: '2px 9px', fontWeight: 800, fontSize: 13,
+            }}>{stat.value}</span>
+            <span style={{ fontSize: 12, color: 'var(--ink2)' }}>{stat.label}</span>
+          </div>
+        ))}
+      </div>
+
       <div style={{
         display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start',
       }}>
@@ -395,6 +484,7 @@ export default function SeatingEditor({ classroomId }: Props) {
           </div>
         </div>
       </div>
+    </div>
     </div>
   );
 }
