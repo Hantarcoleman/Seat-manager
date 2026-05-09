@@ -28,6 +28,7 @@ interface Props { classroomId: string; }
 export default function SeatingEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const students = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
+  const updateStudent = useStudentsStore((s) => s.update);
   const working = useArrangementStore((s) => s.workingByClassroom[classroomId]);
   const setWorking = useArrangementStore((s) => s.setWorking);
   const updateAssignments = useArrangementStore((s) => s.updateAssignments);
@@ -41,6 +42,8 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [hoveredStudentId, setHoveredStudentId] = useState<string | null>(null);
   const [quickAssign, setQuickAssign] = useState<{ seatId: string; x: number; y: number } | null>(null);
   const [quickSearch, setQuickSearch] = useState('');
+  const [editingNameId, setEditingNameId] = useState<string | null>(null);
+  const [editingNameValue, setEditingNameValue] = useState('');
   const [separateGenders, setSeparateGenders] = useState(false);
   const [aiProposals, setAiProposals] = useState<SeatingArrangement[]>([]);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
@@ -143,7 +146,7 @@ export default function SeatingEditor({ classroomId }: Props) {
     for (const desk of classroom.desks) {
       const seats = classroom.seats.filter((s) => s.deskId === desk.id);
       for (const seat of seats) {
-        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -38 : 38;
+        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -42 : 42;
         const rot = (desk.rotation * Math.PI) / 180;
         map.set(seat.id, {
           x: desk.position.x + Math.cos(rot) * dx,
@@ -198,6 +201,13 @@ export default function SeatingEditor({ classroomId }: Props) {
     if (!explanationStudentId || !classroom || !working) return null;
     return getPlacementExplanation(explanationStudentId, { ...working, assignments: displayAssignments }, classroom, students);
   }, [explanationStudentId, working, displayAssignments, classroom, students]);
+
+  const saveEditName = () => {
+    if (editingNameId && editingNameValue.trim()) {
+      updateStudent(classroomId, editingNameId, { name: editingNameValue.trim() });
+    }
+    setEditingNameId(null);
+  };
 
   if (!classroom) return null;
 
@@ -437,8 +447,8 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
-    const w = desk.seatCount === 2 ? 156 : 92;
-    const h = 84;
+    const w = desk.seatCount === 2 ? 176 : 104;
+    const h = 92;
     return (
       <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation}>
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
@@ -451,8 +461,8 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderSeat = (seat: Seat) => {
     const isSolo = seat.side === 'solo';
-    const r = isSolo ? 38 : 32;
-    const dx = isSolo ? 0 : (seat.side === 'left' ? -38 : 38);
+    const r = isSolo ? 42 : 36;
+    const dx = isSolo ? 0 : (seat.side === 'left' ? -42 : 42);
 
     const studentId = seatToStudentId.get(seat.id);
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
@@ -481,8 +491,8 @@ export default function SeatingEditor({ classroomId }: Props) {
       bgColor = '#fff'; strokeColor = '#a8a29e'; strokeW = 2;
     }
 
-    const displayName = stu ? buildDisplayName(stu, students) : '';
-    const fontSize = stu ? calcNameFontSize(displayName, r) : 10;
+    const seatLines = stu ? getSeatLines(stu) : [];
+    const fontSize = stu ? calcLineFontSize(seatLines, r) : 10;
     const textW = Math.round(r * 1.85);
     const pinOff = Math.round(r * 0.68);
     const pinR = 9;
@@ -509,14 +519,20 @@ export default function SeatingEditor({ classroomId }: Props) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onDragEnd={(e: any) => onKonvaDragEnd(e, seat.id, dx)}
         />
-        {stu && (
-          <Text
-            x={dx - textW / 2} y={-fontSize / 2 - 1}
-            width={textW} align="center"
-            text={displayName} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
-            listening={false}
-          />
-        )}
+        {stu && (() => {
+          const lineH = fontSize + 2;
+          const totalH = seatLines.length * lineH;
+          return seatLines.map((line, i) => (
+            <Text
+              key={i}
+              x={dx - textW / 2}
+              y={-totalH / 2 + i * lineH}
+              width={textW} align="center"
+              text={line} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+              listening={false}
+            />
+          ));
+        })()}
         {!stu && !activeSeatQualityStudentId && (
           <Text
             x={dx - 8} y={-9}
@@ -726,6 +742,10 @@ export default function SeatingEditor({ classroomId }: Props) {
                     onChange={(e) => setQuickSearch(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Escape') { setQuickAssign(null); setQuickSearch(''); }
+                      if (e.key === 'Enter') {
+                        const first = unassigned.find((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim()));
+                        if (first) { assignToSeat(quickAssign.seatId, first.id); setQuickAssign(null); setQuickSearch(''); }
+                      }
                     }}
                     onBlur={() => setTimeout(() => { setQuickAssign(null); setQuickSearch(''); }, 150)}
                     placeholder="🔍 שם תלמיד..."
@@ -756,7 +776,7 @@ export default function SeatingEditor({ classroomId }: Props) {
                           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#f3f4f6'; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
                         >
-                          {buildDisplayName(s, students)}
+                          {s.name}
                         </div>
                       ))
                     }
@@ -809,22 +829,50 @@ export default function SeatingEditor({ classroomId }: Props) {
                 const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
                 const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
                 const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+                const isEditing = editingNameId === s.id;
                 return (
-                  <button
-                    key={s.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
-                    onDragEnd={() => setDraggedStudentId(null)}
-                    onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
-                    style={{
-                      background: isP ? '#fff7ed' : bg,
-                      color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
-                      borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
-                      cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
-                    }}
-                  >
-                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
-                  </button>
+                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {isEditing ? (
+                      <input
+                        autoFocus
+                        value={editingNameValue}
+                        onChange={(e) => setEditingNameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') saveEditName();
+                          if (e.key === 'Escape') setEditingNameId(null);
+                        }}
+                        onBlur={saveEditName}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          flex: 1, padding: '5px 10px', fontSize: 13, fontWeight: 700,
+                          border: `1.5px solid ${border}`, borderRadius: 'var(--rs)',
+                          fontFamily: 'inherit', direction: 'rtl', background: bg, color,
+                        }}
+                      />
+                    ) : (
+                      <button
+                        draggable
+                        onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
+                        onDragEnd={() => setDraggedStudentId(null)}
+                        onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
+                        style={{
+                          flex: 1, background: isP ? '#fff7ed' : bg,
+                          color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                          borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
+                          cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
+                        }}
+                      >
+                        {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                      </button>
+                    )}
+                    {!isEditing && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setEditingNameId(s.id); setEditingNameValue(s.name); }}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, opacity: 0.5, padding: '0 2px', lineHeight: 1 }}
+                        title="ערוך שם"
+                      >✏️</button>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -886,8 +934,27 @@ export default function SeatingEditor({ classroomId }: Props) {
               background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
               padding: 12, boxShadow: 'var(--sh)',
             }}>
-              <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6 }}>
-                🔍 {students.find((s) => s.id === explanationStudentId)?.name ?? ''}
+              <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                🔍{' '}
+                {editingNameId === explanationStudentId ? (
+                  <input
+                    autoFocus
+                    value={editingNameValue}
+                    onChange={(e) => setEditingNameValue(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') saveEditName(); if (e.key === 'Escape') setEditingNameId(null); }}
+                    onBlur={saveEditName}
+                    style={{ flex: 1, padding: '2px 6px', fontSize: 13, borderRadius: 4, border: '1px solid var(--bd)', fontFamily: 'inherit', direction: 'rtl' }}
+                  />
+                ) : (
+                  <>
+                    <span>{students.find((s) => s.id === explanationStudentId)?.name ?? ''}</span>
+                    <button
+                      onClick={() => { const stu = students.find((s) => s.id === explanationStudentId); if (stu) { setEditingNameId(stu.id); setEditingNameValue(stu.name); } }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, opacity: 0.5, padding: 0 }}
+                      title="ערוך שם"
+                    >✏️</button>
+                  </>
+                )}
               </div>
               {placementExplanation.seatId === null ? (
                 <div style={{ fontSize: 12, color: 'var(--ink3)' }}>⏳ ממתין לשיבוץ</div>
@@ -990,40 +1057,23 @@ export default function SeatingEditor({ classroomId }: Props) {
   );
 }
 
-// שם תצוגה חכם: שמות מאוחסנים כ"משפחה פרטי" — השם הפרטי הוא המילה האחרונה
-// אם ייחודי → שם פרטי בלבד. אם כפול → "פרטי מ." (אות ראשונה של משפחה). אם עדיין כפול → שם מלא.
-function buildDisplayName(stu: Student, allStudents: Student[]): string {
+// שמות מאוחסנים כ"משפחה פרטי" — מחזיר [שם פרטי, שם משפחה] לתצוגה בשתי שורות
+function getSeatLines(stu: Student): string[] {
   const parts = stu.name.trim().split(/\s+/);
-  // השם הפרטי = מילה אחרונה; שם המשפחה = שאר המילים
-  const first = parts[parts.length - 1] ?? '';
-  const familyInitial = parts.length > 1 ? parts[0][0] + '.' : '';
-
-  const hasDupFirst = allStudents.some((s) => {
-    if (s.id === stu.id) return false;
-    const sp = s.name.trim().split(/\s+/);
-    return (sp[sp.length - 1] ?? '') === first;
-  });
-  if (!hasDupFirst) return first;
-
-  const short = familyInitial ? `${first} ${familyInitial}` : first;
-  const hasDupShort = allStudents.some((s) => {
-    if (s.id === stu.id) return false;
-    const sp = s.name.trim().split(/\s+/);
-    const sf = sp[sp.length - 1] ?? '';
-    const si = sp.length > 1 ? sp[0][0] + '.' : '';
-    return (si ? `${sf} ${si}` : sf) === short;
-  });
-
-  if (!hasDupShort) return short;
-  return stu.name.trim();
+  if (parts.length === 1) return [parts[0]];
+  const first  = parts[parts.length - 1];        // שם פרטי = מילה אחרונה
+  const family = parts.slice(0, -1).join(' ');   // משפחה = שאר
+  return [first, family];
 }
 
-// גודל פונט מקסימלי שמתאים לרדיוס ואורך השם
-function calcNameFontSize(name: string, r: number): number {
-  const availW = r * 1.75;
-  // כל תו עברי רוחבו ≈ fontSize * 0.6
-  const byWidth = availW / (Math.max(1, name.length) * 0.58);
-  return Math.max(9, Math.min(17, Math.floor(byWidth)));
+// גודל פונט מקסימלי שמתאים לרדיוס ואורך השורות
+function calcLineFontSize(lines: string[], r: number): number {
+  const availW = r * 1.72;
+  const maxLen = Math.max(...lines.map((l) => l.length), 1);
+  const byWidth  = Math.floor(availW / (maxLen * 0.55));
+  // שתי שורות + גאפ צריכות להיכנס לקוטר האנכי (r * 2 * 0.75)
+  const byHeight = lines.length > 1 ? Math.floor((r * 1.5 - 2) / 2) : Math.floor(r * 0.72);
+  return Math.max(9, Math.min(byWidth, byHeight, 19));
 }
 
 function HistoryItem({ name, date, onRestore, cloud }: {
