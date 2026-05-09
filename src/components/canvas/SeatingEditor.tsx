@@ -823,8 +823,10 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     const fontSize = stu ? calcRectFontSize(seatLines, seatW, seatH) : 10;
     const textW = seatW - 10;
     const pinR = 9;
-    // פין בפינה עליונה-ימנית של כל ריבוע
-    const pinX = dx + seatW / 2 - pinR - 2;
+    // פין: מושב שמאלי → פינה שמאלית-עליונה, שאר → פינה ימנית-עליונה
+    const pinX = seat.side === 'left'
+      ? dx - seatW / 2 + pinR + 2
+      : dx + seatW / 2 - pinR - 2;
     const pinY = -seatH / 2 + pinR + 2;
     const textColor = stu
       ? (stu.gender === 'm' ? '#1d4ed8' : stu.gender === 'f' ? '#be185d' : '#1c1917')
