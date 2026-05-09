@@ -92,7 +92,7 @@ export default function DeskGridControls({ classroomId, children }: Props) {
               <button
                 style={col.desks.length < 2 ? DIS_BTN : REM_BTN}
                 title="הסר שולחן מהטור"
-                onClick={() => col.desks.length >= 2 && applyOp(columnRemoveOp(col))}
+                onClick={() => col.desks.length >= 2 && applyOp(columnRemoveOp(col, bounds))}
               >−</button>
             </div>
           );
@@ -121,7 +121,7 @@ export default function DeskGridControls({ classroomId, children }: Props) {
                 <button
                   style={row.desks.length < 2 ? DIS_BTN : REM_BTN}
                   title="הסר שולחן מהשורה"
-                  onClick={() => row.desks.length >= 2 && applyOp(rowRemoveOp(row))}
+                  onClick={() => row.desks.length >= 2 && applyOp(rowRemoveOp(row, bounds))}
                 >−</button>
               </div>
             );

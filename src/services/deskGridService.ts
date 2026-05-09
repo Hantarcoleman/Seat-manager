@@ -19,8 +19,8 @@ export interface ClassroomBounds {
   height: number;
 }
 
-// שוליים מינימליים מקצה הכיתה למרכז שולחן (px)
-const DESK_MARGIN = 80;
+// שוליים מינימליים מקצה הכיתה למרכז שולחן (px) — 95 מכסה שולחן זוגי (חצי-רוחב 88px)
+const DESK_MARGIN = 95;
 // מרווח מינימלי בין שולחנות — לא נדחס מתחת לזה
 const MIN_GAP = 60;
 
@@ -110,17 +110,24 @@ export function columnAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOper
   return { updates, add };
 }
 
-// הסרת שולחן מטור — מסיר את האחרון (y מקסימלי), מרווח אחיד
-export function columnRemoveOp(group: DeskGroup): GridOperation {
+// הסרת שולחן מטור — מסיר את האחרון (y מקסימלי), מרחיב רווח לאחר הסרה
+export function columnRemoveOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
   const { desks, gap, mainAxis } = group;
   const removeId = desks[desks.length - 1].id;
   if (desks.length < 2) return { updates: [], removeId };
   const minY = desks[0].position.y;
   const remaining = desks.slice(0, -1);
+  const maxY = bounds.height - DESK_MARGIN;
+
+  // הרחב את הרווח לאחר הסרה — עד לרווח טבעי מקסימלי
+  const expandedGap = remaining.length < 2
+    ? gap
+    : Math.min(110, (maxY - minY) / (remaining.length - 1));
+  const newGap = Math.max(gap, expandedGap);
 
   const updates = remaining.map((d, i) => ({
     id: d.id,
-    position: { x: mainAxis, y: minY + i * gap },
+    position: { x: mainAxis, y: Math.round(minY + i * newGap) },
   }));
 
   return { updates, removeId };
@@ -155,17 +162,24 @@ export function rowAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOperati
   return { updates, add };
 }
 
-// הסרת שולחן משורה — מסיר את האחרון (x מקסימלי), מרווח אחיד
-export function rowRemoveOp(group: DeskGroup): GridOperation {
+// הסרת שולחן משורה — מסיר את האחרון (x מקסימלי), מרחיב רווח לאחר הסרה
+export function rowRemoveOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
   const { desks, gap, mainAxis } = group;
   const removeId = desks[desks.length - 1].id;
   if (desks.length < 2) return { updates: [], removeId };
   const minX = desks[0].position.x;
   const remaining = desks.slice(0, -1);
+  const maxX = bounds.width - DESK_MARGIN;
+
+  // הרחב את הרווח לאחר הסרה — עד לרווח טבעי מקסימלי
+  const expandedGap = remaining.length < 2
+    ? gap
+    : Math.min(110, (maxX - minX) / (remaining.length - 1));
+  const newGap = Math.max(gap, expandedGap);
 
   const updates = remaining.map((d, i) => ({
     id: d.id,
-    position: { x: minX + i * gap, y: mainAxis },
+    position: { x: Math.round(minX + i * newGap), y: mainAxis },
   }));
 
   return { updates, removeId };

@@ -91,15 +91,19 @@ export function validateAssignments(
       });
     }
 
-    // המלצה חיובית: "כדאי שישב/תשב לבד" — נשמר כתקין רק אם המושב יחיד (solo)
+    // המלצה: "כדאי שישב/תשב לבד" — מזהיר רק אם המושב הצמוד בשולחן תפוס
     if (stu.tags.includes('better_alone') && seat.side !== 'solo') {
-      warnings.push({
-        type: 'soft',
-        message: f
-          ? `⭐ ${lui(stu)} כדאי שתשב לבד — יושבת ליד תלמיד/ה אחר/ת`
-          : `⭐ ${lui(stu)} כדאי שישב לבד — יושב ליד תלמיד/ה אחר/ת`,
-        studentIds: [stu.id], seatIds: [seat.id],
-      });
+      const deskSeats = classroom.seats.filter((s) => s.deskId === seat.deskId && s.id !== seatId);
+      const neighborOccupied = deskSeats.some((ds) => seatToStudent.has(ds.id));
+      if (neighborOccupied) {
+        warnings.push({
+          type: 'soft',
+          message: f
+            ? `⭐ ${lui(stu)} כדאי שתשב לבד — יושבת ליד תלמיד/ה אחר/ת`
+            : `⭐ ${lui(stu)} כדאי שישב לבד — יושב ליד תלמיד/ה אחר/ת`,
+          studentIds: [stu.id], seatIds: [seat.id],
+        });
+      }
     }
   }
 

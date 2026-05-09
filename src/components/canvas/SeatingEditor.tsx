@@ -186,7 +186,15 @@ export default function SeatingEditor({ classroomId }: Props) {
       if (stu.tags.includes('needs_front')) { if (zones.has('front_row') || zones.has('second_row')) good = true; else bad = true; }
       if (stu.tags.includes('needs_wall') && zones.has('near_wall')) good = true;
       if (stu.tags.includes('distractible') && (zones.has('near_window') || zones.has('near_door'))) bad = true;
-      if (stu.tags.includes('better_alone') && seat.side === 'solo') good = true;
+      if (stu.tags.includes('better_alone')) {
+        if (seat.side === 'solo') {
+          good = true;
+        } else {
+          const deskSeats = classroom.seats.filter((s) => s.deskId === seat.deskId && s.id !== seat.id);
+          const neighborOccupied = deskSeats.some((ds) => seatToStudentId.has(ds.id));
+          if (!neighborOccupied) good = true; else bad = true;
+        }
+      }
       if (stu.tags.includes('tall') && (zones.has('back_row') || zones.has('side_column'))) good = true;
 
       result.set(seat.id, bad ? 'bad' : good ? 'good' : 'neutral');
@@ -283,6 +291,16 @@ export default function SeatingEditor({ classroomId }: Props) {
     setAiProposals([]); setPreviewIdx(null);
     updateAssignments(classroomId, []);
     clearPins(classroomId);
+    setPickedStudentId(null);
+  };
+
+  const clearExceptPinned = () => {
+    const toKeep = assignments.filter((a) => pinnedSet.has(a.studentId));
+    const toClear = assignments.length - toKeep.length;
+    if (toClear === 0) return;
+    if (!confirm(`למחוק ${toClear} שיבוצים? הנעוצים (${toKeep.length}) יישארו.`)) return;
+    setAiProposals([]); setPreviewIdx(null);
+    updateAssignments(classroomId, toKeep);
     setPickedStudentId(null);
   };
 
@@ -629,7 +647,7 @@ export default function SeatingEditor({ classroomId }: Props) {
                 opacity: generating || students.length === 0 ? 0.7 : 1, fontFamily: 'inherit',
               }}
             >
-              {generating ? '⏳ מחשב...' : '✨ 3 הצעות AI'}
+              {generating ? '⏳ מחשב...' : '✨ סידור חדש בעזרת AI'}
             </button>
             <button
               onClick={saveArrangement}
@@ -667,6 +685,19 @@ export default function SeatingEditor({ classroomId }: Props) {
               }}
             >
               🗑 נקה הכל
+            </button>
+            <button
+              onClick={clearExceptPinned}
+              disabled={assignments.filter((a) => !pinnedSet.has(a.studentId)).length === 0}
+              style={{
+                background: 'var(--bg2)', color: '#dc2626',
+                border: '1.5px solid #fecaca', borderRadius: 'var(--rs)',
+                padding: '8px 16px', fontWeight: 700, fontSize: 13,
+                cursor: assignments.filter((a) => !pinnedSet.has(a.studentId)).length > 0 ? 'pointer' : 'not-allowed',
+                opacity: assignments.filter((a) => !pinnedSet.has(a.studentId)).length > 0 ? 1 : 0.5, fontFamily: 'inherit',
+              }}
+            >
+              🗑 מחק חוץ מנעוצים
             </button>
             <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
               <input
