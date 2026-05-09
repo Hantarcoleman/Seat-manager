@@ -78,6 +78,11 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const exportBtnRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
   const [mobileDesksMode, setMobileDesksMode] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [pendingEmptySeatId, setPendingEmptySeatId] = useState<string | null>(null);
+  const [swapMode, setSwapMode] = useState(false);
+  const [swapFirstSeatId, setSwapFirstSeatId] = useState<string | null>(null);
+  const [userScale, setUserScale] = useState(1);
 
   const user = useAuthStore((s) => s.user);
   const listForClassroom = useArrangementStore((s) => s.listForClassroom);
@@ -280,6 +285,71 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   };
 
   const onSeatClick = (seatId: string) => {
+    if (isMobile) {
+      const occupant = seatToStudentId.get(seatId);
+
+      if (swapMode) {
+        if (!swapFirstSeatId) {
+          if (occupant) setSwapFirstSeatId(seatId);
+        } else {
+          const firstOccupant = seatToStudentId.get(swapFirstSeatId);
+          if (firstOccupant && seatId !== swapFirstSeatId) {
+            if (occupant && !pinnedSet.has(occupant)) {
+              updateWithHistory(assignments.map((a) => {
+                if (a.seatId === swapFirstSeatId) return { seatId, studentId: firstOccupant };
+                if (a.seatId === seatId) return { seatId: swapFirstSeatId, studentId: occupant };
+                return a;
+              }));
+            } else if (!occupant) {
+              updateWithHistory(assignments.map((a) =>
+                a.seatId === swapFirstSeatId ? { seatId, studentId: firstOccupant } : a
+              ));
+            }
+          }
+          setSwapFirstSeatId(null);
+          setSwapMode(false);
+        }
+        return;
+      }
+
+      if (pickedStudentId) {
+        if (pinnedSet.has(pickedStudentId)) { setPickedStudentId(null); return; }
+        const pickedSeat = studentToSeatId.get(pickedStudentId);
+        // לחיצה על המושב הנוכחי של הנבחר → הסרה מהמושב
+        if (seatId === pickedSeat) {
+          removeFromSeat(seatId);
+          setPickedStudentId(null);
+          return;
+        }
+        if (occupant && occupant !== pickedStudentId) {
+          if (pinnedSet.has(occupant)) { setPickedStudentId(null); return; }
+          if (pickedSeat) {
+            updateWithHistory(assignments.map((a) => {
+              if (a.studentId === pickedStudentId) return { seatId, studentId: pickedStudentId };
+              if (a.seatId === seatId) return { seatId: pickedSeat, studentId: occupant };
+              return a;
+            }));
+          } else {
+            assignToSeat(seatId, pickedStudentId);
+          }
+        } else {
+          assignToSeat(seatId, pickedStudentId);
+        }
+        setPickedStudentId(null);
+        return;
+      }
+
+      if (occupant && !pinnedSet.has(occupant)) {
+        setPickedStudentId(occupant);
+      } else if (!occupant) {
+        setPendingEmptySeatId(seatId);
+        setSheetOpen(true);
+        setSearch('');
+      }
+      return;
+    }
+
+    // ── דסקטופ ──────────────────────────────────────────────────
     const occupant = seatToStudentId.get(seatId);
     if (pickedStudentId) {
       if (pinnedSet.has(pickedStudentId)) { setPickedStudentId(null); return; }
@@ -816,6 +886,9 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
       bgColor = '#f5f4f3'; strokeColor = '#e7e5e4'; strokeW = 0;
     }
 
+    // מושב ראשון במצב החלפה — מודגש בכתום
+    if (isMobile && seat.id === swapFirstSeatId) { strokeColor = '#ea580c'; strokeW = 4; }
+
     // עיגול פינות — רק בפינות חיצוניות של השולחן
     const cornerRadius: number | number[] = isSolo ? 4
       : seat.side === 'left' ? [4, 0, 0, 4]
@@ -905,197 +978,236 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
 
   // ── מצב מובייל ──────────────────────────────────────────────
   if (isMobile) {
-    const mobileScale = window.innerWidth / classroom.width;
-    const stageW = Math.round(classroom.width * mobileScale);
-    const stageH = Math.round(classroom.height * mobileScale);
+    const baseScale = window.innerWidth / classroom.width;
+    const effectiveScale = baseScale * userScale;
+    const stageW = Math.round(classroom.width * effectiveScale);
+    const stageH = Math.round(classroom.height * effectiveScale);
 
-    const mobileBtn = (
+    const mkBtn = (
       label: string, onClick: () => void,
-      opts?: { disabled?: boolean; active?: boolean; danger?: boolean; emoji?: string }
+      opts?: { disabled?: boolean; active?: boolean; danger?: boolean }
     ) => {
-      const { disabled = false, active = false, danger = false, emoji } = opts ?? {};
+      const { disabled = false, active = false, danger = false } = opts ?? {};
       return (
-        <button
-          onClick={onClick}
-          disabled={disabled}
-          style={{
-            background: active ? 'var(--ac)' : danger ? '#fef2f2' : 'var(--bg)',
-            color: active ? '#fff' : danger ? 'var(--rd)' : disabled ? 'var(--ink3)' : 'var(--ink)',
-            border: `1.5px solid ${active ? 'var(--ac)' : danger ? '#fecaca' : 'var(--bd2)'}`,
-            borderRadius: 'var(--rs)', padding: '10px 14px', fontSize: 13, fontWeight: 700,
-            cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
-            fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
-            display: 'flex', alignItems: 'center', gap: 5,
-          }}
-        >
-          {emoji && <span>{emoji}</span>}{label}
+        <button onClick={onClick} disabled={disabled} style={{
+          background: active ? 'var(--ac)' : danger ? '#fef2f2' : 'var(--bg)',
+          color: active ? '#fff' : danger ? '#dc2626' : disabled ? 'var(--ink3)' : 'var(--ink)',
+          border: `1.5px solid ${active ? 'var(--ac)' : danger ? '#fecaca' : 'var(--bd2)'}`,
+          borderRadius: 'var(--rs)', padding: '9px 13px', fontSize: 13, fontWeight: 700,
+          cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+          fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
+        }}>
+          {label}
         </button>
       );
     };
 
+    const zoomBtn: React.CSSProperties = {
+      width: 34, height: 34, fontSize: 17, fontWeight: 800,
+      background: 'rgba(255,255,255,0.92)', border: '1.5px solid var(--bd)',
+      borderRadius: 'var(--rs)', cursor: 'pointer', fontFamily: 'inherit',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      boxShadow: '0 2px 8px rgba(0,0,0,.12)',
+    };
+
     return (
-      <div>
-        {/* פס פעולות עליון */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        display: 'flex', flexDirection: 'column',
+        background: 'var(--bg)', direction: 'rtl',
+      }}>
+        {/* פס פעולות */}
         <div style={{
-          padding: '8px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
-          display: 'flex', gap: 8, overflowX: 'auto', alignItems: 'center',
+          display: 'flex', gap: 6, padding: '6px 10px',
+          background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
+          overflowX: 'auto', flexShrink: 0, alignItems: 'center',
         }}>
-          {mobileBtn(generating ? '⏳ מחשב...' : '✨ סידור AI', generateWithAI, {
+          {mkBtn(generating ? '⏳...' : '✨ סידור AI', generateWithAI, {
             disabled: generating || students.length === 0 || classroom.seats.length === 0,
-            emoji: generating ? undefined : undefined,
           })}
-          {mobileBtn('↶', undo, { disabled: undoStack.length === 0 })}
-          {mobileBtn('↷', redo, { disabled: redoStack.length === 0 })}
-          {mobileBtn('✏️ שולחנות', () => setMobileDesksMode((v) => !v), { active: mobileDesksMode })}
-          {!mobileDesksMode && pickedStudentId && mobileBtn('❌ בטל בחירה', () => setPickedStudentId(null), { danger: true })}
+          {mkBtn('↶', undo, { disabled: undoStack.length === 0 })}
+          {mkBtn('↷', redo, { disabled: redoStack.length === 0 })}
+          {mkBtn('🔄 החלף', () => {
+            setSwapMode((v) => !v);
+            setSwapFirstSeatId(null);
+            setPickedStudentId(null);
+          }, { active: swapMode })}
+          {mkBtn(mobileDesksMode ? '📋 סיום' : '✏️ שולחנות', () => {
+            setMobileDesksMode((v) => !v);
+            setPickedStudentId(null);
+            setSwapMode(false);
+            setSwapFirstSeatId(null);
+          }, { active: mobileDesksMode })}
+          {(pickedStudentId || (swapMode && swapFirstSeatId)) && mkBtn('❌ בטל', () => {
+            setPickedStudentId(null);
+            setSwapMode(false);
+            setSwapFirstSeatId(null);
+          }, { danger: true })}
         </div>
 
-        {/* קנבס / עורך שולחנות */}
-        {mobileDesksMode ? (
-          <DeskLayoutEditor classroomId={classroomId} isMobile />
-        ) : (
-          <div>
-            {/* הודעת הדרכה */}
-            {pickedStudentId && (
-              <div style={{
-                padding: '6px 14px', background: '#fff7ed',
-                borderBottom: '1px solid #fed7aa', fontSize: 13, color: '#9a3412', fontWeight: 600,
-              }}>
-                👆 {students.find((s) => s.id === pickedStudentId)?.name ?? ''} נבחר — לחץ על מושב לשיבוץ
-              </div>
+        {/* בר הוראה */}
+        {(pickedStudentId || swapMode) && (
+          <div style={{
+            padding: '6px 14px', background: '#fff7ed',
+            borderBottom: '1px solid #fed7aa',
+            fontSize: 13, color: '#9a3412', fontWeight: 600, flexShrink: 0,
+          }}>
+            {swapMode && !swapFirstSeatId && '🔄 בחר מושב ראשון להחלפה'}
+            {swapMode && swapFirstSeatId && '🔄 בחר מושב שני — יתחלפו'}
+            {!swapMode && pickedStudentId && (
+              `👆 ${students.find((s) => s.id === pickedStudentId)?.name ?? ''} — לחץ מושב לשיבוץ | לחץ שוב להסרה`
             )}
-
-            {/* Stage מסוקל */}
-            <div
-              style={{ position: 'relative', overflowX: 'hidden' }}
-              onDragOver={onCanvasDragOver}
-              onDrop={onCanvasDrop}
-            >
-              <Stage
-                ref={stageRef}
-                width={stageW} height={stageH}
-                scaleX={mobileScale} scaleY={mobileScale}
-                style={{ background: '#fff', display: 'block', cursor: pickedStudentId ? 'crosshair' : 'default' }}
-                onClick={(e) => { if (e.target === e.target.getStage()) setSelectedDeskId(null); }}
-              >
-                <Layer>
-                  {classroom.walls.map(renderWall)}
-                  {classroom.fixedElements.map(renderTeacherDesk)}
-                  {classroom.desks.map(renderDesk)}
-                  {renderSnapGuides()}
-                </Layer>
-              </Stage>
-
-              {/* שיבוץ מהיר */}
-              {quickAssign && (
-                <div style={{
-                  position: 'absolute',
-                  left: Math.min(quickAssign.x * mobileScale - 70, stageW - 168),
-                  top: Math.max(4, quickAssign.y * mobileScale - 90),
-                  zIndex: 200, background: '#fff',
-                  border: '1.5px solid var(--bd)', borderRadius: 10,
-                  boxShadow: '0 4px 20px rgba(0,0,0,.18)', padding: 8, minWidth: 164, direction: 'rtl',
-                }}>
-                  <input
-                    autoFocus value={quickSearch}
-                    onChange={(e) => setQuickSearch(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') { setQuickAssign(null); setQuickSearch(''); }
-                      if (e.key === 'Enter') {
-                        const first = unassigned.find((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim()));
-                        if (first) { assignToSeat(quickAssign.seatId, first.id); setQuickAssign(null); setQuickSearch(''); }
-                      }
-                    }}
-                    onBlur={() => setTimeout(() => { setQuickAssign(null); setQuickSearch(''); }, 150)}
-                    placeholder="🔍 שם תלמיד..."
-                    style={{ width: '100%', padding: '5px 8px', fontSize: 13,
-                      border: '1px solid var(--bd)', borderRadius: 6,
-                      fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box' }}
-                  />
-                  <div style={{ maxHeight: 148, overflowY: 'auto', marginTop: 4 }}>
-                    {unassigned.filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim())).slice(0, 8).map((s) => (
-                      <div key={s.id}
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => { assignToSeat(quickAssign.seatId, s.id); setQuickAssign(null); setQuickSearch(''); }}
-                        style={{ padding: '5px 8px', cursor: 'pointer', fontSize: 13, borderRadius: 5 }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#f3f4f6'; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
-                      >
-                        {s.name}
-                      </div>
-                    ))}
-                    {unassigned.filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim())).length === 0 && (
-                      <div style={{ fontSize: 12, color: 'var(--ink3)', padding: '5px 8px' }}>אין תוצאות</div>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
         )}
 
-        {/* פאנל ממתינים */}
-        {!mobileDesksMode && (
-          <div style={{
-            padding: 12, background: 'var(--bg2)', borderTop: '1px solid var(--bd)',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 800 }}>⏳ ממתינים ({unassigned.length})</span>
-              {assignments.length > 0 && (
-                <span style={{ fontSize: 12, color: 'var(--ink3)' }}>· {assignments.length} משובצים</span>
-              )}
-              <button
-                onClick={onParkingDrop}
-                disabled={!pickedStudentId || !studentToSeatId.has(pickedStudentId)}
-                style={{
-                  marginRight: 'auto', padding: '4px 10px', fontSize: 12, fontWeight: 700,
-                  background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg)',
-                  color: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#9a3412' : 'var(--ink3)',
-                  border: `1.5px solid ${pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fed7aa' : 'var(--bd)'}`,
-                  borderRadius: 'var(--rs)', cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
-                ← החזר לממתינים
-              </button>
+        {/* קנבס / עורך שולחנות */}
+        {mobileDesksMode ? (
+          <div style={{ flex: 1, overflow: 'auto' }}>
+            <DeskLayoutEditor classroomId={classroomId} isMobile />
+          </div>
+        ) : (
+          <div style={{ flex: 1, overflow: 'auto', position: 'relative' }}>
+            {/* כפתורי זום — דביקים בראש */}
+            <div style={{
+              position: 'sticky', top: 8, zIndex: 10,
+              display: 'flex', justifyContent: 'flex-start',
+              padding: '0 8px', pointerEvents: 'none',
+              marginBottom: -42,
+            }}>
+              <div style={{ display: 'flex', gap: 4, pointerEvents: 'all' }}>
+                <button
+                  onClick={() => setUserScale((s) => Math.max(1, parseFloat((s - 0.3).toFixed(1))))}
+                  disabled={userScale <= 1}
+                  style={{ ...zoomBtn, opacity: userScale <= 1 ? 0.35 : 1 }}
+                >−</button>
+                {userScale > 1 && (
+                  <button onClick={() => setUserScale(1)} style={zoomBtn}>⊙</button>
+                )}
+                <button
+                  onClick={() => setUserScale((s) => Math.min(4, parseFloat((s + 0.3).toFixed(1))))}
+                  disabled={userScale >= 4}
+                  style={{ ...zoomBtn, opacity: userScale >= 4 ? 0.35 : 1 }}
+                >+</button>
+              </div>
             </div>
 
-            <input
-              type="text" value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="🔍 חיפוש תלמיד..."
-              style={{ width: '100%', padding: '7px 10px', fontSize: 13, marginBottom: 8,
-                border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
-                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box' }}
-            />
+            <Stage
+              ref={stageRef}
+              width={stageW} height={stageH}
+              scaleX={effectiveScale} scaleY={effectiveScale}
+              style={{
+                background: '#fff', display: 'block',
+                cursor: pickedStudentId ? 'crosshair' : swapMode ? 'cell' : 'default',
+              }}
+              onClick={(e) => {
+                if (e.target === e.target.getStage()) {
+                  setSelectedDeskId(null);
+                  setPickedStudentId(null);
+                }
+              }}
+            >
+              <Layer>
+                {classroom.walls.map(renderWall)}
+                {classroom.fixedElements.map(renderTeacherDesk)}
+                {classroom.desks.map(renderDesk)}
+                {renderSnapGuides()}
+              </Layer>
+            </Stage>
+          </div>
+        )}
 
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {filteredUnassigned.length === 0 ? (
-                <div style={{ fontSize: 13, color: 'var(--ink3)', padding: '4px 0' }}>
-                  {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
-                </div>
-              ) : filteredUnassigned.map((s) => {
-                const isP = pickedStudentId === s.id;
-                const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
-                const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
-                const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
-                return (
-                  <button
-                    key={s.id}
-                    draggable
-                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
-                    onDragEnd={() => setDraggedStudentId(null)}
-                    onClick={() => onParkingStudentClick(s.id)}
-                    style={{
-                      background: isP ? '#fff7ed' : bg, color,
-                      border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
-                      borderRadius: 'var(--rx)', padding: '6px 12px', fontSize: 13, fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
-                  </button>
-                );
-              })}
+        {/* Bottom Sheet — ממתינים */}
+        {!mobileDesksMode && (
+          <div style={{
+            flexShrink: 0,
+            height: sheetOpen ? '48%' : 50,
+            minHeight: sheetOpen ? 180 : 50,
+            transition: 'height 0.25s ease',
+            display: 'flex', flexDirection: 'column',
+            background: 'var(--bg2)', borderTop: '1.5px solid var(--bd)',
+            overflow: 'hidden',
+          }}>
+            {/* ידית */}
+            <div
+              onClick={() => {
+                setSheetOpen((v) => !v);
+                if (sheetOpen) setPendingEmptySeatId(null);
+              }}
+              style={{
+                height: 50, flexShrink: 0,
+                display: 'flex', alignItems: 'center', padding: '0 14px', gap: 8,
+                cursor: 'pointer', userSelect: 'none',
+              }}
+            >
+              <span style={{
+                fontSize: 13, display: 'inline-block',
+                transition: 'transform 0.25s',
+                transform: sheetOpen ? 'rotate(180deg)' : 'none',
+              }}>▲</span>
+              <span style={{ fontSize: 14, fontWeight: 800 }}>
+                {pendingEmptySeatId
+                  ? '👆 בחר תלמיד לשיבוץ'
+                  : unassigned.length === 0
+                    ? '✓ כולם משובצים!'
+                    : `ממתינים ${unassigned.length}`}
+              </span>
+              {assignments.length > 0 && unassigned.length > 0 && !pendingEmptySeatId && (
+                <span style={{ fontSize: 12, color: 'var(--ink3)', marginRight: 'auto' }}>
+                  ✓ {assignments.length} משובצים
+                </span>
+              )}
+            </div>
+
+            {/* תוכן */}
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', padding: '0 10px 10px' }}>
+              <input
+                type="text" value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="🔍 חיפוש תלמיד..."
+                style={{
+                  width: '100%', padding: '7px 10px', fontSize: 13, marginBottom: 8,
+                  border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
+                  fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box',
+                }}
+              />
+              <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {filteredUnassigned.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--ink3)', padding: '12px 0', textAlign: 'center' }}>
+                    {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
+                  </div>
+                ) : filteredUnassigned.map((s) => {
+                  const isP = pickedStudentId === s.id;
+                  const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
+                  const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                  const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        if (pendingEmptySeatId) {
+                          assignToSeat(pendingEmptySeatId, s.id);
+                          setPendingEmptySeatId(null);
+                          setSheetOpen(false);
+                        } else {
+                          setPickedStudentId(isP ? null : s.id);
+                          if (!isP) setSheetOpen(false);
+                        }
+                      }}
+                      style={{
+                        background: isP ? '#fff7ed' : bg, color,
+                        border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                        borderRadius: 'var(--rs)', padding: '10px 14px',
+                        fontSize: 14, fontWeight: 700,
+                        cursor: 'pointer', fontFamily: 'inherit',
+                        textAlign: 'right', display: 'flex', alignItems: 'center', gap: 6,
+                      }}
+                    >
+                      <span>{s.gender === 'f' ? '👧' : s.gender === 'm' ? '👦' : '👤'}</span>
+                      <span style={{ flex: 1 }}>{s.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}

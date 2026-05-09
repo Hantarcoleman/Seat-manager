@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useClassroomStore } from '../../store/classroomStore';
 import { useStudentsStore } from '../../store/studentsStore';
@@ -7,7 +7,7 @@ import DeskLayoutEditor from '../canvas/DeskLayoutEditor';
 import StudentManager from '../students/StudentManager';
 import SeatingEditor from '../canvas/SeatingEditor';
 
-export type MobileTab = 'room' | 'desks' | 'students' | 'seating';
+export type MobileTab = 'seating' | 'students' | 'desks' | 'room';
 
 interface Props {
   classroomId: string;
@@ -15,22 +15,11 @@ interface Props {
 }
 
 const TABS: { id: MobileTab; emoji: string; label: string }[] = [
-  { id: 'room',     emoji: '🏛', label: 'כיתה' },
-  { id: 'desks',    emoji: '🪑', label: 'שולחנות' },
-  { id: 'students', emoji: '👤', label: 'תלמידים' },
   { id: 'seating',  emoji: '📋', label: 'סידור' },
+  { id: 'students', emoji: '👤', label: 'תלמידים' },
+  { id: 'desks',    emoji: '🪑', label: 'שולחנות' },
+  { id: 'room',     emoji: '🏛',  label: 'כיתה' },
 ];
-
-function useIsPortrait() {
-  const [portrait, setPortrait] = useState(() => window.innerHeight > window.innerWidth);
-  useEffect(() => {
-    const update = () => setPortrait(window.innerHeight > window.innerWidth);
-    window.addEventListener('resize', update);
-    window.addEventListener('orientationchange', update);
-    return () => { window.removeEventListener('resize', update); window.removeEventListener('orientationchange', update); };
-  }, []);
-  return portrait;
-}
 
 export default function MobileClassroomView({ classroomId, initialTab = 'seating' }: Props) {
   const [activeTab, setActiveTab] = useState<MobileTab>(initialTab);
@@ -39,24 +28,10 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
   const [bulkGender, setBulkGender] = useState<'m' | 'f' | undefined>(undefined);
   const [bulkDone, setBulkDone] = useState(false);
   const navigate = useNavigate();
-  const isPortrait = useIsPortrait();
-  const orientationLocked = useRef(false);
 
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const addStudent = useStudentsStore((s) => s.add);
   const students   = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
-
-  // נסה לנעול orientation לרוחב (עובד ב-Android Chrome PWA)
-  useEffect(() => {
-    if (orientationLocked.current) return;
-    orientationLocked.current = true;
-    try {
-      if (screen.orientation && 'lock' in screen.orientation) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (screen.orientation as any).lock('landscape').catch(() => {});
-      }
-    } catch {}
-  }, []);
 
   const handleBulkAdd = () => {
     const names = bulkText.split('\n').map((n) => n.trim()).filter(Boolean);
@@ -91,25 +66,6 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
         direction: 'rtl',
       }}>
 
-        {/* Overlay לפורטרט */}
-        {isPortrait && (
-          <div style={{
-            position: 'absolute', inset: 0, zIndex: 100,
-            background: 'rgba(15,10,5,0.93)',
-            display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 20,
-          }}>
-            <div style={{ fontSize: 72, lineHeight: 1, animation: 'spin90 1.2s ease-in-out infinite alternate' }}>🔄</div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: '#fff', textAlign: 'center' }}>
-              סובב את המכשיר לרוחב
-            </div>
-            <div style={{ fontSize: 15, color: '#a8a29e', textAlign: 'center' }}>
-              האפליקציה עובדת במצב רוחב בלבד
-            </div>
-            <style>{`@keyframes spin90 { from { transform: rotate(0deg); } to { transform: rotate(25deg); } }`}</style>
-          </div>
-        )}
-
         {/* כותרת */}
         <div style={{
           display: 'flex', alignItems: 'center', gap: 10,
@@ -132,7 +88,10 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
         </div>
 
         {/* תוכן */}
-        <div style={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+        <div style={{
+          flex: 1, minHeight: 0, position: 'relative',
+          overflow: activeTab === 'seating' ? 'hidden' : 'auto',
+        }}>
           {activeTab === 'room' && <RoomEditor classroomId={classroomId} isMobile />}
           {activeTab === 'desks' && <DeskLayoutEditor classroomId={classroomId} isMobile />}
 
