@@ -66,6 +66,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   // מצב פאנל תלמידים: key מאלץ remount, addMode קובע initialMode
   const [studentPanelKey, setStudentPanelKey] = useState(0);
   const [studentAddMode, setStudentAddMode] = useState(false);
+  const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
   const stageRef = useRef<Konva.Stage>(null);
 
   const user = useAuthStore((s) => s.user);
@@ -522,6 +523,24 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     );
   };
 
+  const SNAP_THRESHOLD = 12;
+
+  const renderSnapGuides = () => {
+    if (snapGuides.vLines.length === 0 && snapGuides.hLines.length === 0) return null;
+    return (
+      <>
+        {snapGuides.vLines.map((x, i) => (
+          <Line key={`sv${i}`} points={[x, 0, x, classroom.height]}
+                stroke="#ea580c" strokeWidth={1.5} dash={[8, 5]} listening={false} opacity={0.7} />
+        ))}
+        {snapGuides.hLines.map((y, i) => (
+          <Line key={`sh${i}`} points={[0, y, classroom.width, y]}
+                stroke="#ea580c" strokeWidth={1.5} dash={[8, 5]} listening={false} opacity={0.7} />
+        ))}
+      </>
+    );
+  };
+
   const renderDesk = (desk: Desk) => {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
     const w = desk.seatCount === 2 ? 176 : 104;
@@ -531,9 +550,24 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     return (
       <Group
         key={desk.id}
+        id={`desk-${desk.id}`}
         x={desk.position.x} y={desk.position.y} rotation={desk.rotation}
         draggable
+        onDragMove={(e) => {
+          let cx = e.target.x();
+          let cy = e.target.y();
+          const vLines: number[] = [];
+          const hLines: number[] = [];
+          classroom.desks.forEach((other) => {
+            if (other.id === desk.id) return;
+            if (Math.abs(other.position.x - cx) <= SNAP_THRESHOLD) { cx = other.position.x; vLines.push(other.position.x); }
+            if (Math.abs(other.position.y - cy) <= SNAP_THRESHOLD) { cy = other.position.y; hLines.push(other.position.y); }
+          });
+          if (cx !== e.target.x() || cy !== e.target.y()) { e.target.x(cx); e.target.y(cy); }
+          setSnapGuides({ vLines, hLines });
+        }}
         onDragEnd={(e) => {
+          setSnapGuides({ vLines: [], hLines: [] });
           const newX = Math.max(halfW, Math.min(classroom.width - halfW, e.target.x()));
           const newY = Math.max(halfH, Math.min(classroom.height - halfH, e.target.y()));
           e.target.x(newX);
@@ -852,6 +886,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
                   {classroom.walls.map(renderWall)}
                   {classroom.fixedElements.map(renderTeacherDesk)}
                   {classroom.desks.map(renderDesk)}
+                  {renderSnapGuides()}
                 </Layer>
               </Stage>
 
