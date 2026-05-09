@@ -12,7 +12,6 @@ import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncSer
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
-import DeskGridControls from './DeskGridControls';
 import StudentManager from '../students/StudentManager';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -29,6 +28,7 @@ interface Props { classroomId: string; }
 export default function SeatingEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const updateDesk = useClassroomStore((s) => s.updateDesk);
+  const addDesk = useClassroomStore((s) => s.addDesk);
   const students = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
   const updateStudent = useStudentsStore((s) => s.update);
   const forbiddenGroups = useStudentsStore((s) => s.forbiddenGroups[classroomId] ?? []);
@@ -435,15 +435,24 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     if (!working) return;
     const name = prompt('שם לסידור (לדוגמה: "שבוע א\'")', `סידור ${new Date().toLocaleDateString('he-IL')}`);
     if (!name) return;
-    const id = saveCurrent(classroomId, name);
+    const deskPositions = Object.fromEntries(classroom.desks.map((d) => [d.id, d.position]));
+    const id = saveCurrent(classroomId, name, deskPositions);
     if (id && isSupabaseEnabled() && user && classroom) {
       const arr = useArrangementStore.getState().saved[id];
       if (arr) await saveArrangementHistory(arr, classroom.name);
     }
   };
 
+  const applyDeskPositions = (arr: SeatingArrangement) => {
+    if (!arr.deskPositions) return;
+    Object.entries(arr.deskPositions).forEach(([deskId, pos]) => {
+      updateDesk(deskId, { position: pos });
+    });
+  };
+
   const restoreFromHistory = (arr: SeatingArrangement) => {
     updateAssignments(classroomId, arr.assignments);
+    applyDeskPositions(arr);
     setUndoStack([]); setRedoStack([]);
     setPickedStudentId(null);
     setShowHistory(false);
@@ -849,6 +858,35 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
             >
               ↪ הבא
             </button>
+            <div style={{ width: 1, height: 28, background: 'var(--bd2)', margin: '0 4px' }} />
+            <button
+              onClick={() => addDesk(
+                { position: { x: Math.round(classroom.width / 2), y: Math.round(classroom.height / 2) }, rotation: 0, seatCount: 1 },
+                [{ side: 'solo', autoZones: [] }]
+              )}
+              style={{
+                background: 'var(--bg2)', color: 'var(--ink)', border: '1.5px solid var(--bd)',
+                borderRadius: 'var(--rs)', padding: '8px 12px', fontWeight: 700, fontSize: 13,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+              title="הוסף שולחן יחיד לקנבס"
+            >
+              ＋ שולחן יחיד
+            </button>
+            <button
+              onClick={() => addDesk(
+                { position: { x: Math.round(classroom.width / 2), y: Math.round(classroom.height / 2) }, rotation: 0, seatCount: 2 },
+                [{ side: 'left', autoZones: [] }, { side: 'right', autoZones: [] }]
+              )}
+              style={{
+                background: 'var(--bg2)', color: 'var(--ink)', border: '1.5px solid var(--bd)',
+                borderRadius: 'var(--rs)', padding: '8px 12px', fontWeight: 700, fontSize: 13,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+              title="הוסף שולחן זוג לקנבס"
+            >
+              ＋ שולחן זוג
+            </button>
             <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
                 <strong>{displayAssignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
@@ -868,7 +906,6 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
               : '💡 לחץ/גרור תלמיד מרשימת ההמתנה · לחץ על מושב תפוס להזזה · דאבל-קליק להסרה · ↩ בטל לביטול מהלך'}
           </div>
 
-          <DeskGridControls classroomId={classroomId}>
             <div
               style={{
                 background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
@@ -958,7 +995,6 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
                 </div>
               )}
             </div>
-          </DeskGridControls>
         </div>
 
         {/* ── עמודה ימנית ── */}
@@ -1204,7 +1240,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
                             key={arr.id}
                             name={arr.name}
                             date={arr.createdAt}
-                            onRestore={() => { restore(arr.id); setShowHistory(false); setPickedStudentId(null); }}
+                            onRestore={() => { restore(arr.id); applyDeskPositions(arr); setShowHistory(false); setPickedStudentId(null); }}
                           />
                         ))}
                         {cloudHistory

@@ -213,6 +213,7 @@ export interface SeatingArrangement {
   warnings: ArrangementWarning[];
   notes?: string;
   createdAt: string;
+  deskPositions?: Record<string, { x: number; y: number }>; // snapshot מיקומי שולחנות
 }
 
 // ── אפשרויות לאלגוריתם ────────────────────────────────────

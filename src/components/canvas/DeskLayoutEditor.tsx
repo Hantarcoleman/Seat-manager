@@ -4,7 +4,6 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import type { Wall, FixedElement, Point, Desk, Seat, ZoneTag } from '../../types';
 import { computeAllAutoZones } from '../../services/zoneCalculator';
-import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -671,6 +670,22 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
         <ActionButton onClick={undo} disabled={historyDepth === 0} emoji="↶" label={`ביטול${historyDepth ? ` (${historyDepth})` : ''}`} />
         <ActionButton onClick={redo} disabled={futureDepth === 0}  emoji="↷" label={`הבא${futureDepth ? ` (${futureDepth})` : ''}`} />
         <ActionButton
+          onClick={() => addDesk(
+            { position: { x: Math.round(classroom.width / 2), y: Math.round(classroom.height / 2) }, rotation: 0, seatCount: 1 },
+            [{ side: 'solo', autoZones: [] }]
+          )}
+          emoji="＋"
+          label="שולחן יחיד"
+        />
+        <ActionButton
+          onClick={() => addDesk(
+            { position: { x: Math.round(classroom.width / 2), y: Math.round(classroom.height / 2) }, rotation: 0, seatCount: 2 },
+            [{ side: 'left', autoZones: [] }, { side: 'right', autoZones: [] }]
+          )}
+          emoji="＋"
+          label="שולחן זוג"
+        />
+        <ActionButton
           onClick={() => {
             if (selectedIds.size === 0) return;
             selectedIds.forEach((id) => removeDesk(id));
@@ -716,8 +731,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           : '💡 לחץ על הקנבס להצבת התבנית. לאחר ההצבה — גרור להזזה. גלגלת = זום, לחצן אמצעי = הזזת תצוגה.'}
       </div>
 
-      <DeskGridControls classroomId={classroomId}>
-        <div style={{
+      <div style={{
           background: 'var(--bg2)', border: '1.5px solid var(--bd)', borderRadius: 'var(--r)',
           overflow: 'hidden', boxShadow: 'var(--sh)', position: 'relative',
         }}>
@@ -751,7 +765,6 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
             {selectedIds.size > 0 && ` · ${selectedIds.size} נבחרו`}
           </div>
         </div>
-      </DeskGridControls>
     </div>
   );
 }

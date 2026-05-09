@@ -20,7 +20,7 @@ interface ArrangementState {
 
   hydrateSaved: (saved: Record<string, SeatingArrangement>) => void;
   // ── שמירה / שחזור ──
-  saveCurrent: (classroomId: string, name: string) => string | null;
+  saveCurrent: (classroomId: string, name: string, deskPositions?: Record<string, { x: number; y: number }>) => string | null;
   restore: (id: string) => void;
   duplicate: (id: string, newName?: string) => string | null;
   rename: (id: string, name: string) => void;
@@ -89,7 +89,7 @@ export const useArrangementStore = create<ArrangementState>()(
       hydrateSaved: (incoming) =>
         set((s) => ({ saved: { ...incoming, ...s.saved } })),
 
-      saveCurrent: (classroomId, name) => {
+      saveCurrent: (classroomId, name, deskPositions) => {
         const cur = get().workingByClassroom[classroomId];
         if (!cur) return null;
         const id = uid();
@@ -98,6 +98,7 @@ export const useArrangementStore = create<ArrangementState>()(
           id,
           name,
           createdAt: new Date().toISOString(),
+          ...(deskPositions ? { deskPositions } : {}),
         };
         set((s) => ({ saved: { ...s.saved, [id]: snapshot } }));
         return id;
