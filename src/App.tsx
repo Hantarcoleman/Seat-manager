@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Link } from 'react-router-dom';
+import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
 import StudentsPage from './pages/StudentsPage';
@@ -7,10 +7,16 @@ import LoginPage from './components/auth/LoginPage';
 import { useAuthStore } from './store/authStore';
 import { useCloudSync } from './hooks/useCloudSync';
 import { isSupabaseEnabled } from './services/supabaseClient';
+import { useIsMobile } from './hooks/useIsMobile';
 import './App.css';
 
 function AppShell() {
   const { user, loading, signOut } = useAuthStore();
+  const isMobile = useIsMobile();
+  const location = useLocation();
+  const isClassroomRoute = location.pathname.startsWith('/classroom/');
+  // במובייל בתוך כיתה — MobileClassroomView מכסה הכל, מסתירים header ו-padding
+  const hideChrome = isMobile && isClassroomRoute;
   useCloudSync();
 
   // אם Supabase מוגדר ועוד מחכים לתשובה
@@ -31,7 +37,7 @@ function AppShell() {
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
       <header style={{
         background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
-        padding: '12px 24px', display: 'flex', alignItems: 'center', gap: 16,
+        padding: '12px 24px', display: hideChrome ? 'none' : 'flex', alignItems: 'center', gap: 16,
         boxShadow: 'var(--sh)',
       }}>
         <Link to="/" style={{ textDecoration: 'none', color: 'var(--ink)', flex: 1 }}>
@@ -61,7 +67,7 @@ function AppShell() {
         )}
       </header>
 
-      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '24px' }}>
+      <main style={{ maxWidth: hideChrome ? undefined : 1280, margin: hideChrome ? undefined : '0 auto', padding: hideChrome ? 0 : '24px' }}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/classroom/:id/setup" element={<ClassroomSetup />} />
