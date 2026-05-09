@@ -5,6 +5,7 @@ import { useStudentsStore } from '../store/studentsStore';
 import { useRequestsStore } from '../store/requestsStore';
 import {
   fetchRequests, respondToRequest, deleteRequest, subscribeToRequests,
+  upsertClassroomShare,
 } from '../services/requestsService';
 import { isSupabaseEnabled } from '../services/supabaseClient';
 import ClassroomNav from '../components/canvas/ClassroomNav';
@@ -126,11 +127,9 @@ function RespondModal({ req, onClose, onRespond }: RespondModalProps) {
   );
 }
 
-function ShareModal({ data, onClose }: { data: SharedClassroomData; onClose: () => void }) {
+function ShareModal({ data, shortUrl, onClose }: { data: SharedClassroomData; shortUrl: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
-  const encoded = encodeShareData(data);
-  const base = window.location.href.split('#')[0];
-  const url = `${base}#/request?d=${encoded}`;
+  const url = shortUrl;
 
   const handleCopy = async () => {
     await navigator.clipboard.writeText(url);
@@ -214,7 +213,8 @@ export default function RequestsDashboard() {
   const requests = useSupabase ? sbRequests : localRequests;
 
   const [respondingTo, setRespondingTo] = useState<SeatRequest | null>(null);
-  const [showShare, setShowShare] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [sharingLoading, setSharingLoading] = useState(false);
   const [importedName, setImportedName] = useState<string | null>(null);
   const [filter, setFilter] = useState<SeatRequestStatus | 'all'>('all');
 
@@ -294,6 +294,27 @@ export default function RequestsDashboard() {
     students: students.map((s) => s.name),
   };
 
+  const handleOpenShare = async () => {
+    const base = window.location.href.split('#')[0];
+    if (useSupabase) {
+      setSharingLoading(true);
+      const ok = await upsertClassroomShare({
+        classroomId: classroom.id,
+        classroomName: classroom.name,
+        students: students.map((s) => s.name),
+      });
+      setSharingLoading(false);
+      // קישור קצר אם upsert הצליח, אחרת fallback מקודד
+      if (ok) {
+        setShareUrl(`${base}#/request/${classroom.id}`);
+      } else {
+        setShareUrl(`${base}#/request?d=${encodeShareData(shareData)}`);
+      }
+    } else {
+      setShareUrl(`${base}#/request?d=${encodeShareData(shareData)}`);
+    }
+  };
+
   const filtered = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
 
@@ -338,12 +359,13 @@ export default function RequestsDashboard() {
           {useSupabase && (
             <button onClick={loadFromSupabase} style={ghostBtn} title="רענן">↻ רענן</button>
           )}
-          <button onClick={() => setShowShare(true)} style={{
+          <button onClick={handleOpenShare} disabled={sharingLoading} style={{
             background: 'var(--ac)', color: '#fff', border: 'none',
             borderRadius: 'var(--rs)', padding: '10px 18px',
-            fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+            fontWeight: 700, fontSize: 14, cursor: sharingLoading ? 'default' : 'pointer',
+            fontFamily: 'inherit', opacity: sharingLoading ? 0.7 : 1,
           }}>
-            📤 שתף קישור לתלמידים
+            {sharingLoading ? '⏳ מכין קישור...' : '📤 שתף קישור לתלמידים'}
           </button>
         </div>
       </div>
@@ -445,8 +467,8 @@ export default function RequestsDashboard() {
         />
       )}
 
-      {showShare && (
-        <ShareModal data={shareData} onClose={() => setShowShare(false)} />
+      {shareUrl && (
+        <ShareModal data={shareData} shortUrl={shareUrl} onClose={() => setShareUrl(null)} />
       )}
     </div>
   );

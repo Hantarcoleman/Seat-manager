@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useMemo, useEffect } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import type { SharedClassroomData } from '../types';
-import { submitRequest } from '../services/requestsService';
+import { submitRequest, fetchClassroomShare } from '../services/requestsService';
 import { isSupabaseEnabled } from '../services/supabaseClient';
 import { useRequestsStore } from '../store/requestsStore';
 
@@ -35,13 +35,30 @@ function encodeRequestUrl(classroomId: string, requesterName: string, preferredN
 }
 
 export default function StudentRequestPage() {
-  const [params] = useSearchParams();
-  const data = useMemo(() => {
-    const raw = params.get('d');
-    return raw ? decodeShareData(raw) : null;
-  }, [params]);
-
+  const { classroomId } = useParams<{ classroomId?: string }>();
+  const [searchParams] = useSearchParams();
   const addLocal = useRequestsStore((s) => s.add);
+
+  // נתונים מ-URL ישן (fallback כשאין Supabase)
+  const urlData = useMemo(() => {
+    const raw = searchParams.get('d');
+    return raw ? decodeShareData(raw) : null;
+  }, [searchParams]);
+
+  const [data, setData] = useState<SharedClassroomData | null>(urlData);
+  const [loadingData, setLoadingData] = useState(!!classroomId && !urlData);
+
+  // טעינה מ-Supabase כשיש classroomId ב-URL
+  useEffect(() => {
+    if (!classroomId) return;
+    setLoadingData(true);
+    fetchClassroomShare(classroomId).then((result) => {
+      if (result) {
+        setData({ classroomId, name: result.classroomName, students: result.students });
+      }
+      setLoadingData(false);
+    });
+  }, [classroomId]);
 
   const [requesterName, setRequesterName] = useState('');
   const [preferredNear, setPreferredNear] = useState('');
@@ -51,6 +68,17 @@ export default function StudentRequestPage() {
   const [submitError, setSubmitError] = useState(false);
   const [fallbackUrl, setFallbackUrl] = useState('');
   const [copied, setCopied] = useState(false);
+
+  if (loadingData) {
+    return (
+      <div style={pageStyle}>
+        <div style={cardStyle}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>⏳</div>
+          <p style={{ color: 'var(--ink2)', margin: 0 }}>טוען...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!data) {
     return (

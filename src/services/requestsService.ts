@@ -89,6 +89,40 @@ export async function deleteRequest(id: string): Promise<boolean> {
   return true;
 }
 
+// ── שיתוף כיתה ─────────────────────────────────────────────
+
+// שמירת נתוני כיתה לשיתוף — מייצר קישור קצר ללא base64
+export async function upsertClassroomShare(data: {
+  classroomId: string;
+  classroomName: string;
+  students: string[];
+}): Promise<boolean> {
+  if (!supabase) return false;
+  const { error } = await supabase.from('classroom_shares').upsert({
+    classroom_id: data.classroomId,
+    classroom_name: data.classroomName,
+    students: data.students,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) { console.error('upsertClassroomShare:', error); return false; }
+  return true;
+}
+
+// טעינת נתוני כיתה לטופס התלמיד
+export async function fetchClassroomShare(classroomId: string): Promise<{
+  classroomName: string;
+  students: string[];
+} | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from('classroom_shares')
+    .select('classroom_name, students')
+    .eq('classroom_id', classroomId)
+    .single();
+  if (error || !data) return null;
+  return { classroomName: data.classroom_name, students: data.students as string[] };
+}
+
 // מנוי real-time — קריאה אוטומטית כשמגיעה בקשה חדשה
 export function subscribeToRequests(
   classroomId: string,

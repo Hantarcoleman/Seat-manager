@@ -11,6 +11,9 @@ import { exportSeatsPdf, exportSeatsImageBlob } from '../../services/pdfExportSe
 import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncService';
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
+import { fetchRequests, subscribeToRequests } from '../../services/requestsService';
+import { useRequestsStore } from '../../store/requestsStore';
+import type { SeatRequest } from '../../types';
 import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
 import StudentManager from '../students/StudentManager';
 import DeskLayoutEditor from './DeskLayoutEditor';
@@ -74,6 +77,19 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [selectedDeskId, setSelectedDeskId] = useState<string | null>(null);
   const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
+
+  // בקשות מעבר מקום — לתצוגה ב-hover
+  const localRequests = useRequestsStore((s) => s.get(classroomId));
+  const [sbRequests, setSbRequests] = useState<SeatRequest[]>([]);
+  const allRequests = isSupabaseEnabled() ? sbRequests : localRequests;
+  // map: שם תלמיד → בקשה אחרונה (pending קודם, אחרת הכי חדשה)
+  const requestByName = useMemo(() => {
+    const m = new Map<string, SeatRequest>();
+    [...allRequests].reverse().forEach((r) => m.set(r.requesterName, r));
+    // pending מנצח כל סטטוס
+    allRequests.filter((r) => r.status === 'pending').forEach((r) => m.set(r.requesterName, r));
+    return m;
+  }, [allRequests]);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportBtnRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -99,6 +115,15 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     if (!showHistory || !isSupabaseEnabled() || !user) return;
     loadHistory(classroomId).then(setCloudHistory);
   }, [showHistory, classroomId, user]);
+
+  // טעינת בקשות מעבר מקום מ-Supabase
+  useEffect(() => {
+    if (!isSupabaseEnabled()) return;
+    fetchRequests(classroomId).then(setSbRequests);
+    return subscribeToRequests(classroomId, () => {
+      fetchRequests(classroomId).then(setSbRequests);
+    });
+  }, [classroomId]);
 
   useEffect(() => {
     if (!working && classroom) {
@@ -1692,6 +1717,39 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
                       ))}
                     </div>
                   )}
+
+                  {/* בקשת מעבר מקום */}
+                  {(() => {
+                    const stuName = students.find((s) => s.id === explanationStudentId)?.name;
+                    const req = stuName ? requestByName.get(stuName) : undefined;
+                    if (!req) return null;
+                    const colors = {
+                      pending:  { bg: '#fff3cd', color: '#856404', label: 'ממתין' },
+                      approved: { bg: '#d1e7dd', color: '#0a5c36', label: 'אושר' },
+                      denied:   { bg: '#f8d7da', color: '#842029', label: 'נדחה' },
+                    }[req.status];
+                    return (
+                      <div style={{
+                        marginTop: 6, borderTop: '1px solid var(--bd)', paddingTop: 6,
+                        display: 'flex', flexDirection: 'column', gap: 3,
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink2)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                          📬 בקשת מעבר מקום
+                          <span style={{ background: colors.bg, color: colors.color, borderRadius: 10, padding: '1px 7px', fontSize: 10 }}>
+                            {colors.label}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--ink)' }}>
+                          ליד: <strong>{req.preferredNear}</strong>
+                        </div>
+                        {req.message && (
+                          <div style={{ fontSize: 11, color: 'var(--ink2)', fontStyle: 'italic' }}>
+                            "{req.message}"
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

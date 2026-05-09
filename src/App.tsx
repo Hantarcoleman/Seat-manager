@@ -86,7 +86,8 @@ export default function App() {
   return (
     <HashRouter>
       <Routes>
-        {/* נתיב ציבורי — ללא הדר ואימות */}
+        {/* נתיבים ציבוריים — ללא הדר ואימות */}
+        <Route path="/request/:classroomId" element={<StudentRequestPage />} />
         <Route path="/request" element={<StudentRequestPage />} />
         {/* כל שאר הנתיבים — עם AppShell */}
         <Route path="/*" element={<AppShell />} />
