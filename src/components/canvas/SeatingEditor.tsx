@@ -759,6 +759,24 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
           </Group>
         )}
         {seats.map((seat) => renderSeat(seat))}
+        {/* ידית גרירה — פס עליון */}
+        <Rect
+          name="desk-bg"
+          x={-20} y={-halfH}
+          width={40} height={16}
+          fill="rgba(120,113,108,0.14)"
+          cornerRadius={[4, 4, 0, 0]}
+          listening={true}
+        />
+        {[[-6, 0], [0, 0], [6, 0], [-6, 5], [0, 5], [6, 5]].map(([dotX, dotY], i) => (
+          <Circle
+            key={`dot-${i}`}
+            x={dotX} y={-halfH + 6 + dotY}
+            radius={1.8}
+            fill="#78716c"
+            listening={false}
+          />
+        ))}
       </Group>
     );
   };
