@@ -12,8 +12,6 @@ import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncSer
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
-import { TAG_DEFS, getConflictingTag } from '../../types';
-import type { StudentTag } from '../../types';
 import DeskGridControls from './DeskGridControls';
 import StudentManager from '../students/StudentManager';
 
@@ -61,8 +59,6 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [addingGroup, setAddingGroup] = useState(false);
   const [newGroupIds, setNewGroupIds] = useState<string[]>([]);
   const [groupSearch, setGroupSearch] = useState('');
-  // פאנל תלמידים
-  const [showStudents, setShowStudents] = useState(false);
   // סלקטור פאנל ימני
   const [rightPanel, setRightPanel] = useState<'waiting' | 'forbidden' | 'students'>('waiting');
   const stageRef = useRef<Konva.Stage>(null);
