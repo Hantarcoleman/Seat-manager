@@ -259,6 +259,8 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     setRubberStart(null); setRubberEnd(null);
   };
 
+  const DESK_MARGIN = 95;
+
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.target !== stageRef.current) return;
     if (isSelectMode) return; // טיפול ב-mouseup
@@ -268,7 +270,17 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     if (!pos) return;
     const center = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
     const items = buildTemplate(template, center, cfg);
-    items.forEach((item) => addDesk(item.desk, item.seats));
+    items.forEach((item) => {
+      // כלוא מרכז שולחן בתוך גבולות הכיתה
+      const clamped = {
+        ...item.desk,
+        position: {
+          x: Math.max(DESK_MARGIN, Math.min(classroom.width - DESK_MARGIN, item.desk.position.x)),
+          y: Math.max(DESK_MARGIN, Math.min(classroom.height - DESK_MARGIN, item.desk.position.y)),
+        },
+      };
+      addDesk(clamped, item.seats);
+    });
   };
 
   const onStageMouseMove = () => {
@@ -352,9 +364,13 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           setSelectedIds(new Set([desk.id]));
         }}
         onDragEnd={(e) => {
-          updateDesk(desk.id, {
-            position: { x: snap(e.target.x(), gridOn), y: snap(e.target.y(), gridOn) },
-          });
+          const deskW = desk.seatCount === 2 ? 130 : 80;
+          const halfW = deskW / 2;
+          const halfH = 35;
+          const newX = Math.max(halfW, Math.min(classroom.width - halfW, snap(e.target.x(), gridOn)));
+          const newY = Math.max(halfH, Math.min(classroom.height - halfH, snap(e.target.y(), gridOn)));
+          e.target.x(newX); e.target.y(newY);
+          updateDesk(desk.id, { position: { x: newX, y: newY } });
         }}
       >
         <Rect

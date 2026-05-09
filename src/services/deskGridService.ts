@@ -110,26 +110,26 @@ export function columnAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOper
   return { updates, add };
 }
 
-// הסרת שולחן מטור — מסיר את האחרון (y מקסימלי), מרחיב רווח לאחר הסרה
+// הסרת שולחן מטור — מסיר את האחרון (y מקסימלי), מפזר את הנותרים שווה-שווה
 export function columnRemoveOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
-  const { desks, gap, mainAxis } = group;
+  const { desks, mainAxis } = group;
   const removeId = desks[desks.length - 1].id;
   if (desks.length < 2) return { updates: [], removeId };
-  const minY = desks[0].position.y;
   const remaining = desks.slice(0, -1);
-  const maxY = bounds.height - DESK_MARGIN;
 
-  // הרחב את הרווח לאחר הסרה — עד לרווח טבעי מקסימלי
-  const expandedGap = remaining.length < 2
-    ? gap
-    : Math.min(110, (maxY - minY) / (remaining.length - 1));
-  const newGap = Math.max(gap, expandedGap);
+  // ריווח שווה בטווח שהנותרים תופסים (ראשון עד אחרון של remaining)
+  const minY = remaining[0].position.y;
+  const maxRemainingY = remaining[remaining.length - 1].position.y;
+  const span = maxRemainingY - minY;
+  const evenGap = remaining.length >= 2 ? Math.round(span / (remaining.length - 1)) : 0;
 
   const updates = remaining.map((d, i) => ({
     id: d.id,
-    position: { x: mainAxis, y: Math.round(minY + i * newGap) },
+    position: { x: mainAxis, y: Math.round(minY + i * evenGap) },
   }));
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  void bounds;
   return { updates, removeId };
 }
 
@@ -162,25 +162,24 @@ export function rowAddOp(group: DeskGroup, bounds: ClassroomBounds): GridOperati
   return { updates, add };
 }
 
-// הסרת שולחן משורה — מסיר את האחרון (x מקסימלי), מרחיב רווח לאחר הסרה
+// הסרת שולחן משורה — מסיר את האחרון (x מקסימלי), מפזר את הנותרים שווה-שווה
 export function rowRemoveOp(group: DeskGroup, bounds: ClassroomBounds): GridOperation {
-  const { desks, gap, mainAxis } = group;
+  const { desks, mainAxis } = group;
   const removeId = desks[desks.length - 1].id;
   if (desks.length < 2) return { updates: [], removeId };
-  const minX = desks[0].position.x;
   const remaining = desks.slice(0, -1);
-  const maxX = bounds.width - DESK_MARGIN;
 
-  // הרחב את הרווח לאחר הסרה — עד לרווח טבעי מקסימלי
-  const expandedGap = remaining.length < 2
-    ? gap
-    : Math.min(110, (maxX - minX) / (remaining.length - 1));
-  const newGap = Math.max(gap, expandedGap);
+  const minX = remaining[0].position.x;
+  const maxRemainingX = remaining[remaining.length - 1].position.x;
+  const span = maxRemainingX - minX;
+  const evenGap = remaining.length >= 2 ? Math.round(span / (remaining.length - 1)) : 0;
 
   const updates = remaining.map((d, i) => ({
     id: d.id,
-    position: { x: Math.round(minX + i * newGap), y: mainAxis },
+    position: { x: Math.round(minX + i * evenGap), y: mainAxis },
   }));
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  void bounds;
   return { updates, removeId };
 }

@@ -6,7 +6,7 @@ interface Props {
 }
 
 const TABS = [
-  { path: 'setup',   label: '🏗 כיתה ושולחנות' },
+  { path: 'setup',   label: '🏗 עריכת חדר ושולחנות' },
   { path: 'seating', label: '📋 ניהול תלמידים ומקומות ישיבה' },
 ];
 

@@ -28,6 +28,7 @@ interface Props { classroomId: string; }
 
 export default function SeatingEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
+  const updateDesk = useClassroomStore((s) => s.updateDesk);
   const students = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
   const updateStudent = useStudentsStore((s) => s.update);
   const forbiddenGroups = useStudentsStore((s) => s.forbiddenGroups[classroomId] ?? []);
@@ -41,8 +42,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const clearPins = useArrangementStore((s) => s.clearPins);
   const pinnedSet = useMemo(() => new Set(pinnedStudentIds), [pinnedStudentIds]);
 
-  const [addStudentCounter, setAddStudentCounter] = useState(0);
-  const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
+const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
   const [hoveredStudentId, setHoveredStudentId] = useState<string | null>(null);
   const [quickAssign, setQuickAssign] = useState<{ seatId: string; x: number; y: number } | null>(null);
@@ -63,6 +63,9 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [groupSearch, setGroupSearch] = useState('');
   // סלקטור פאנל ימני
   const [rightPanel, setRightPanel] = useState<'waiting' | 'forbidden' | 'students'>('waiting');
+  // מצב פאנל תלמידים: key מאלץ remount, addMode קובע initialMode
+  const [studentPanelKey, setStudentPanelKey] = useState(0);
+  const [studentAddMode, setStudentAddMode] = useState(false);
   const stageRef = useRef<Konva.Stage>(null);
 
   const user = useAuthStore((s) => s.user);
@@ -523,11 +526,24 @@ export default function SeatingEditor({ classroomId }: Props) {
     const seats = classroom.seats.filter((s) => s.deskId === desk.id);
     const w = desk.seatCount === 2 ? 176 : 104;
     const h = 92;
+    const halfW = w / 2;
+    const halfH = h / 2;
     return (
-      <Group key={desk.id} x={desk.position.x} y={desk.position.y} rotation={desk.rotation}>
+      <Group
+        key={desk.id}
+        x={desk.position.x} y={desk.position.y} rotation={desk.rotation}
+        draggable
+        onDragEnd={(e) => {
+          const newX = Math.max(halfW, Math.min(classroom.width - halfW, e.target.x()));
+          const newY = Math.max(halfH, Math.min(classroom.height - halfH, e.target.y()));
+          e.target.x(newX);
+          e.target.y(newY);
+          updateDesk(desk.id, { position: { x: Math.round(newX), y: Math.round(newY) } });
+        }}
+      >
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
               fill="#e7e5e4" stroke="#78716c" strokeWidth={1.5} cornerRadius={6}
-              listening={false} />
+              listening={true} />
         {seats.map((seat) => renderSeat(seat))}
       </Group>
     );
@@ -914,7 +930,7 @@ export default function SeatingEditor({ classroomId }: Props) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginTop: 90 }}>
           {/* כפתור הוספת תלמיד */}
           <button
-            onClick={() => { setRightPanel('students'); setAddStudentCounter((c) => c + 1); }}
+            onClick={() => { setStudentAddMode(true); setStudentPanelKey((k) => k + 1); setRightPanel('students'); }}
             style={{
               background: 'var(--ac)', color: '#fff', border: 'none',
               borderRadius: 'var(--rs)', padding: '9px 16px', fontWeight: 800, fontSize: 14,
@@ -940,7 +956,13 @@ export default function SeatingEditor({ classroomId }: Props) {
               return (
                 <button
                   key={panel}
-                  onClick={() => setRightPanel(panel)}
+                  onClick={() => {
+                    if (panel === 'students') {
+                      setStudentAddMode(false);
+                      setStudentPanelKey((k) => k + 1);
+                    }
+                    setRightPanel(panel);
+                  }}
                   style={{
                     flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: isActive ? 800 : 600,
                     background: isActive ? 'var(--ac)' : 'transparent',
@@ -1332,9 +1354,9 @@ export default function SeatingEditor({ classroomId }: Props) {
           {rightPanel === 'students' && (
             <div style={{ minWidth: 0 }}>
               <StudentManager
-                key={addStudentCounter}
+                key={studentPanelKey}
                 classroomId={classroomId}
-                initialMode={addStudentCounter > 0 ? 'add' : 'list'}
+                initialMode={studentAddMode ? 'add' : 'list'}
               />
             </div>
           )}

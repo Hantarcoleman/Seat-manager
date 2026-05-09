@@ -2,9 +2,9 @@ import { useState, useRef, useEffect } from 'react';
 import { Stage, Layer, Line, Rect, Group, Text, Circle } from 'react-konva';
 import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
-import type { WallType, FixedElementType, Point, Wall, FixedElement, WallPoint, Desk } from '../../types';
+import type { WallType, FixedElementType, Point, Wall, FixedElement, Desk } from '../../types';
 import { buildGenericClassroom } from '../../services/classroomTemplates';
-import { tryEmbedDoor, tryEmbedSegment } from '../../services/wallGeometry';
+import { tryEmbedDoor, tryEmbedSegment, projectOntoWall } from '../../services/wallGeometry';
 
 const WALL_STYLES: Record<WallType, { color: string; width: number; dash?: number[]; label: string; emoji: string }> = {
   blank:        { color: '#1c1917', width: 6,                       label: 'קיר אטום',    emoji: '⬛' },
@@ -61,26 +61,6 @@ function buildLRoomWalls(topLeft: Point, size: { w: number; h: number; notchW: n
   return walls;
 }
 
-function splitWallAtPoint(wall: Wall, p: Point): { a: Omit<Wall, 'id'>; b: Omit<Wall, 'id'> } | null {
-  if (wall.points.length < 2) return null;
-  let bestI = 0, bestDist = Infinity, bestProj: Point = wall.points[0];
-  for (let i = 0; i < wall.points.length - 1; i++) {
-    const a = wall.points[i];
-    const b = wall.points[i + 1];
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const len2 = dx * dx + dy * dy;
-    if (len2 === 0) continue;
-    let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2;
-    t = Math.max(0, Math.min(1, t));
-    const px = a.x + t * dx, py = a.y + t * dy;
-    const d = Math.hypot(p.x - px, p.y - py);
-    if (d < bestDist) { bestDist = d; bestI = i; bestProj = { x: Math.round(px), y: Math.round(py) }; }
-  }
-  const a: WallPoint[] = [...wall.points.slice(0, bestI + 1), bestProj];
-  const b: WallPoint[] = [bestProj, ...wall.points.slice(bestI + 1)];
-  if (a.length < 2 || b.length < 2) return null;
-  return { a: { type: wall.type, points: a }, b: { type: wall.type, points: b } };
-}
 
 // בדיקת חפיפה בין קיר לרצועת בחירה
 function wallIntersectsRect(w: Wall, r: { x1: number; y1: number; x2: number; y2: number }): boolean {
@@ -127,7 +107,8 @@ export default function RoomEditor({ classroomId }: Props) {
   const [rubberStart, setRubberStart] = useState<Point | null>(null);
   const [rubberEnd, setRubberEnd] = useState<Point | null>(null);
 
-  const [splitMode, setSplitMode] = useState(false);
+  // תצוגה מקדימה של דלת בריחוף מעל קיר
+  const [doorPreview, setDoorPreview] = useState<{ p1: Point; p2: Point } | null>(null);
 
   // מודאל כיתה גנרית
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
@@ -193,7 +174,7 @@ export default function RoomEditor({ classroomId }: Props) {
         if (totalSelected > 0) deleteSelected();
       } else if (e.key === 'Escape' || e.key === 'Enter') {
         if (drafting) finishDraft();
-        else { clearSelection(); setSplitMode(false); setRubberStart(null); setRubberEnd(null); }
+        else { clearSelection(); setRubberStart(null); setRubberEnd(null); }
       }
     };
     window.addEventListener('keydown', handler);
@@ -202,14 +183,15 @@ export default function RoomEditor({ classroomId }: Props) {
   }, [drafting, draftingType, undo, redo, totalSelected, selectedWallIds, selectedFixedIds]);
 
   const switchTool = (next: ToolMode) => {
-    // לחיצה על סוג קיר כשיש קיר נבחר במצב בחירה — המר את הקיר במקום לפתוח כלי ציור
-    if (isSelectTool && selectedWallIds.size === 1 && (Object.keys(WALL_STYLES) as string[]).includes(next as string)) {
+    // לחיצה על סוג קיר (לא דלת) כשיש קיר נבחר — המר את הקיר במקום לפתוח כלי ציור
+    // דלת תמיד מוצבת ידנית בתוך קיר קיים ולא ממירה קיר שלם
+    if (isSelectTool && selectedWallIds.size === 1 && next !== 'door' && (Object.keys(WALL_STYLES) as string[]).includes(next as string)) {
       updateWall(Array.from(selectedWallIds)[0], { type: next as WallType });
       return;
     }
     if (drafting) finishDraft();
     setShapeStart(null);
-    setSplitMode(false);
+    setDoorPreview(null);
     setRubberStart(null);
     setRubberEnd(null);
     setTool(next);
@@ -321,22 +303,6 @@ export default function RoomEditor({ classroomId }: Props) {
     if (!pos) return;
     let p: Point = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
 
-    if (splitMode && selectedWallIds.size === 1) {
-      const wid = Array.from(selectedWallIds)[0];
-      const w = classroom.walls.find((x) => x.id === wid);
-      if (w) {
-        const result = splitWallAtPoint(w, p);
-        if (result) {
-          removeWall(w.id);
-          addWall(result.a);
-          addWall(result.b);
-          setSplitMode(false);
-          clearSelection();
-        }
-      }
-      return;
-    }
-
     if (isDoorTool) {
       // אם לחצנו על קיר קיים — נטמיע את הדלת בתוכו (ניהפך אותו לדלת בקטע הזה)
       const embed = tryEmbedDoor(classroom.walls, p);
@@ -383,6 +349,42 @@ export default function RoomEditor({ classroomId }: Props) {
     } else {
       setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
     }
+    if (isDoorTool) {
+      computeDoorPreview({ x: pos.x, y: pos.y });
+    } else if (doorPreview) {
+      setDoorPreview(null);
+    }
+  };
+
+  const computeDoorPreview = (clickPoint: Point) => {
+    const DOOR_LEN = 50;
+    const TOLERANCE = 30;
+    let bestWall: Wall | null = null;
+    let bestProj: { distance: number; segIdx: number; t: number; point: Point } | null = null;
+    for (const wall of classroom.walls) {
+      if (wall.type === 'door') continue;
+      const proj = projectOntoWall(clickPoint, wall);
+      if (proj.distance > TOLERANCE) continue;
+      if (!bestProj || proj.distance < bestProj.distance) {
+        bestWall = wall; bestProj = proj;
+      }
+    }
+    if (!bestWall || !bestProj) { setDoorPreview(null); return; }
+    const segStart = bestWall.points[bestProj.segIdx];
+    const segEnd = bestWall.points[bestProj.segIdx + 1];
+    const segLen = Math.hypot(segEnd.x - segStart.x, segEnd.y - segStart.y);
+    if (segLen < DOOR_LEN + 6) { setDoorPreview(null); return; }
+    const half = (DOOR_LEN / 2) / segLen;
+    let t1 = bestProj.t - half;
+    let t2 = bestProj.t + half;
+    if (t1 < 0) { t2 -= t1; t1 = 0; }
+    if (t2 > 1) { t1 -= (t2 - 1); t2 = 1; }
+    if (t1 < 0) t1 = 0;
+    const lerp = (a: Point, b: Point, t: number): Point => ({
+      x: Math.round(a.x + t * (b.x - a.x)),
+      y: Math.round(a.y + t * (b.y - a.y)),
+    });
+    setDoorPreview({ p1: lerp(segStart, segEnd, t1), p2: lerp(segStart, segEnd, t2) });
   };
 
   // ── רינדור ─────────────────────────────────────────
@@ -759,13 +761,6 @@ export default function RoomEditor({ classroomId }: Props) {
               </button>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <ActionButton onClick={() => setSplitMode(!splitMode)} emoji="✂"
-              label={splitMode ? 'בטל פיצול' : 'פצל בנקודה'} active={splitMode} />
-            <span style={{ fontSize: 12, color: 'var(--ink3)', alignSelf: 'center' }}>
-              {splitMode ? '👆 לחץ במקום שבו ברצונך לפצל את הקיר.' : 'פיצול מאפשר להמיר רק חלק מהקיר.'}
-            </span>
-          </div>
         </div>
       )}
 
@@ -776,7 +771,7 @@ export default function RoomEditor({ classroomId }: Props) {
         {isManualWallTool && (drafting
           ? `✏ ${drafting.length} נקודות. סיום: Enter / Esc / לחיצה כפולה. ביטול = ביטול נקודה.`
           : '✏ לחץ נקודה ראשונה. לחיצות נוספות יוסיפו נקודות לאותו קיר.')}
-        {isDoorTool && '🚪 לחיצה אחת מציבה דלת.'}
+        {isDoorTool && '🚪 הזזת עכבר מעל קיר מציגה תצוגה מקדימה של הדלת. לחיצה מציבה את הדלת.'}
         {isFixedTool && '🪑 לחץ על מיקום הצבת השולחן.'}
       </div>
 
@@ -800,6 +795,14 @@ export default function RoomEditor({ classroomId }: Props) {
             {renderDraft()}
             {renderShapePreview()}
             {renderRubberBand()}
+            {isDoorTool && doorPreview && (
+              <Group listening={false}>
+                <Line points={[doorPreview.p1.x, doorPreview.p1.y, doorPreview.p2.x, doorPreview.p2.y]}
+                      stroke="#ffffff" strokeWidth={10} lineCap="butt" />
+                <Line points={[doorPreview.p1.x, doorPreview.p1.y, doorPreview.p2.x, doorPreview.p2.y]}
+                      stroke="#ea580c" strokeWidth={4} lineCap="butt" dash={[6, 4]} opacity={0.9} />
+              </Group>
+            )}
           </Layer>
         </Stage>
         <div style={{
@@ -809,7 +812,6 @@ export default function RoomEditor({ classroomId }: Props) {
           {mousePos.x},{mousePos.y}
           {totalSelected > 0 && ` · ${totalSelected} נבחרו`}
           {drafting && ` · בציור: ${drafting.length} נק׳`}
-          {splitMode && ' · מצב פיצול'}
         </div>
       </div>
 
