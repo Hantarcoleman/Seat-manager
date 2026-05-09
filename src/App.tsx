@@ -3,6 +3,8 @@ import Dashboard from './pages/Dashboard';
 import ClassroomSetup from './pages/ClassroomSetup';
 import StudentsPage from './pages/StudentsPage';
 import SeatingPage from './pages/SeatingPage';
+import RequestsDashboard from './pages/RequestsDashboard';
+import StudentRequestPage from './pages/StudentRequestPage';
 import LoginPage from './components/auth/LoginPage';
 import { useAuthStore } from './store/authStore';
 import { useCloudSync } from './hooks/useCloudSync';
@@ -73,6 +75,7 @@ function AppShell() {
           <Route path="/classroom/:id/setup" element={<ClassroomSetup />} />
           <Route path="/classroom/:id/students" element={<StudentsPage />} />
           <Route path="/classroom/:id/seating" element={<SeatingPage />} />
+          <Route path="/classroom/:id/requests" element={<RequestsDashboard />} />
         </Routes>
       </main>
     </div>
@@ -82,7 +85,12 @@ function AppShell() {
 export default function App() {
   return (
     <HashRouter>
-      <AppShell />
+      <Routes>
+        {/* נתיב ציבורי — ללא הדר ואימות */}
+        <Route path="/request" element={<StudentRequestPage />} />
+        {/* כל שאר הנתיבים — עם AppShell */}
+        <Route path="/*" element={<AppShell />} />
+      </Routes>
     </HashRouter>
   );
 }

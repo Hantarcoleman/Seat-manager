@@ -228,3 +228,26 @@ export interface GenerateArrangementOptions {
   mixGenders?: boolean;       // נסה לצמד בן ובת באותו שולחן
   forbiddenGroups?: string[][];  // קבוצות תלמידים שאסור להושיב יחד
 }
+
+// ── בקשות מעבר מקום ישיבה ────────────────────────────────────
+export type SeatRequestStatus = 'pending' | 'approved' | 'denied';
+
+export interface SeatRequest {
+  id: string;
+  classroomId: string;
+  classroomName: string;
+  requesterName: string;       // שם התלמיד שמגיש הבקשה
+  preferredNear: string;       // שם התלמיד שרוצים לשבת לידו, או 'לא משנה'
+  message: string;             // מלל חופשי
+  status: SeatRequestStatus;
+  response?: string;           // תשובת המורה
+  createdAt: string;
+  respondedAt?: string;
+}
+
+// נתונים שמקודדים ב-URL של קישור השיתוף לתלמידים
+export interface SharedClassroomData {
+  classroomId: string;
+  name: string;          // שם הכיתה
+  students: string[];    // שמות התלמידים
+}

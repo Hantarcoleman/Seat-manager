@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useClassroomStore } from '../../store/classroomStore';
+import { useRequestsStore } from '../../store/requestsStore';
 
 interface Props {
   classroomId: string;
   classroomName: string;
 }
 
-const TABS = [
+const STATIC_TABS = [
   { path: 'seating', label: '📋 ניהול תלמידים ומקומות ישיבה' },
   { path: 'setup',   label: '🏗 עריכת קירות ושולחנות' },
 ];
@@ -16,6 +17,9 @@ export default function ClassroomNav({ classroomId, classroomName }: Props) {
   const location = useLocation();
   const currentTab = location.pathname.split('/').pop();
   const renameClassroom = useClassroomStore((s) => s.renameClassroom);
+  const pendingCount = useRequestsStore((s) =>
+    (s.byClassroom[classroomId] ?? []).filter((r) => r.status === 'pending').length
+  );
 
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState(classroomName);
@@ -73,7 +77,7 @@ export default function ClassroomNav({ classroomId, classroomName }: Props) {
         borderBottom: '2px solid var(--bd)',
         paddingBottom: 0,
       }}>
-        {TABS.map((tab) => {
+        {STATIC_TABS.map((tab) => {
           const active = currentTab === tab.path;
           return (
             <Link
@@ -93,6 +97,33 @@ export default function ClassroomNav({ classroomId, classroomName }: Props) {
             </Link>
           );
         })}
+        {/* טאב בקשות עם badge */}
+        <Link
+          to={`/classroom/${classroomId}/requests`}
+          style={{
+            padding: '10px 16px',
+            fontSize: 14,
+            fontWeight: 700,
+            textDecoration: 'none',
+            color: currentTab === 'requests' ? 'var(--ac)' : 'var(--ink2)',
+            borderBottom: currentTab === 'requests' ? '3px solid var(--ac)' : '3px solid transparent',
+            marginBottom: -2,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+          }}
+        >
+          📬 בקשות מעבר מקום
+          {pendingCount > 0 && (
+            <span style={{
+              background: 'var(--ac)', color: '#fff',
+              borderRadius: 20, padding: '1px 7px',
+              fontSize: 11, fontWeight: 700, lineHeight: '18px',
+            }}>
+              {pendingCount}
+            </span>
+          )}
+        </Link>
       </div>
     </div>
   );
