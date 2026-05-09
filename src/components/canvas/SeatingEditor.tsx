@@ -58,6 +58,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [cloudHistory, setCloudHistory] = useState<import('../../services/cloudSyncService').HistoryEntry[]>([]);
   // שילובים אסורים — מצב פאנל
   const [addingGroup, setAddingGroup] = useState(false);
+  const [editingGroupIdx, setEditingGroupIdx] = useState<number | null>(null);
   const [newGroupIds, setNewGroupIds] = useState<string[]>([]);
   const [groupSearch, setGroupSearch] = useState('');
   // סלקטור פאנל ימני
@@ -594,12 +595,13 @@ export default function SeatingEditor({ classroomId }: Props) {
         />
         {stu && (() => {
           const lineH = fontSize + 2;
-          const totalH = seatLines.length * lineH;
+          // גובה ויזואלי אמיתי: שורות ביניים + גובה שורה אחרונה
+          const visualH = (seatLines.length - 1) * lineH + fontSize;
           return seatLines.map((line, i) => (
             <Text
               key={i}
               x={dx - textW / 2}
-              y={-totalH / 2 + i * lineH}
+              y={-visualH / 2 + i * lineH}
               width={textW} align="center"
               text={line} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
               listening={false}
@@ -617,6 +619,7 @@ export default function SeatingEditor({ classroomId }: Props) {
         {stu && (
           <>
             <Circle
+              name="pin"
               x={dx + pinOff} y={-pinOff} radius={pinR}
               fill={isPinned ? '#7c3aed' : '#e2e8f0'}
               stroke={isPinned ? '#5b21b6' : '#94a3b8'} strokeWidth={1}
@@ -625,6 +628,7 @@ export default function SeatingEditor({ classroomId }: Props) {
               onTap={(e) => { e.cancelBubble = true; togglePin(classroomId, stu.id); }}
             />
             <Text
+              name="pin"
               x={dx + pinOff - pinR} y={-pinOff - pinR + 1}
               width={pinR * 2} align="center"
               text="📌" fontSize={isPinned ? 9 : 8} listening={false}
@@ -1190,6 +1194,19 @@ export default function SeatingEditor({ classroomId }: Props) {
                         🚫 {group.map((id) => students.find((s) => s.id === id)?.name ?? id).join(' · ')}
                       </div>
                       <button
+                        onClick={() => {
+                          setEditingGroupIdx(idx);
+                          setNewGroupIds([...group]);
+                          setGroupSearch('');
+                          setAddingGroup(true);
+                        }}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          fontSize: 13, color: '#92400e', padding: '0 4px', lineHeight: 1, flexShrink: 0,
+                        }}
+                        title="ערוך שילוב"
+                      >✏️</button>
+                      <button
                         onClick={() => removeForbiddenGroup(classroomId, idx)}
                         style={{
                           background: 'none', border: 'none', cursor: 'pointer',
@@ -1209,7 +1226,7 @@ export default function SeatingEditor({ classroomId }: Props) {
                   padding: 10,
                 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--ac)' }}>
-                    + קבוצה חדשה
+                    {editingGroupIdx !== null ? '✏️ עריכת שילוב' : '+ קבוצה חדשה'}
                   </div>
                   {/* תלמידים שנבחרו */}
                   {newGroupIds.length > 0 && (
@@ -1267,7 +1284,13 @@ export default function SeatingEditor({ classroomId }: Props) {
                       disabled={newGroupIds.length < 2}
                       onClick={() => {
                         if (newGroupIds.length >= 2) {
-                          addForbiddenGroup(classroomId, newGroupIds);
+                          if (editingGroupIdx !== null) {
+                            removeForbiddenGroup(classroomId, editingGroupIdx);
+                            addForbiddenGroup(classroomId, newGroupIds);
+                            setEditingGroupIdx(null);
+                          } else {
+                            addForbiddenGroup(classroomId, newGroupIds);
+                          }
                           setNewGroupIds([]);
                           setGroupSearch('');
                           setAddingGroup(false);
@@ -1283,7 +1306,7 @@ export default function SeatingEditor({ classroomId }: Props) {
                       שמור קבוצה {newGroupIds.length >= 2 ? `(${newGroupIds.length})` : '— בחר 2+'}
                     </button>
                     <button
-                      onClick={() => { setAddingGroup(false); setNewGroupIds([]); setGroupSearch(''); }}
+                      onClick={() => { setAddingGroup(false); setNewGroupIds([]); setGroupSearch(''); setEditingGroupIdx(null); }}
                       style={{
                         background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
                         padding: '7px 12px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',

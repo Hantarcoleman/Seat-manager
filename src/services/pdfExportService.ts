@@ -139,7 +139,12 @@ export function exportSeatsPdf(stage: Konva.Stage, opts: PdfOptions): void {
   const PIXEL_RATIO = 2;
   const stageW = stage.width();
   const stageH = stage.height();
+
+  // הסתרת נעיצות לצורך הדפסה נקייה
+  const pinNodes = stage.find('.pin');
+  pinNodes.forEach((n) => n.hide());
   const imgData = stage.toDataURL({ pixelRatio: PIXEL_RATIO });
+  pinNodes.forEach((n) => n.show());
 
   const LABEL_MARGIN = 52;   // שוליים לתוויות קירות (px ב-1x)
   const HEADER_H = 72;       // גובה הכותרת (px ב-1x)
