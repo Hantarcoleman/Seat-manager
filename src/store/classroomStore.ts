@@ -21,6 +21,7 @@ interface ClassroomState {
 
   // ── קירות ──
   addWall: (wall: Omit<Wall, 'id'>) => string;
+  addWalls: (walls: Omit<Wall, 'id'>[]) => string[];
   updateWall: (id: string, patch: Partial<Wall>) => void;
   removeWall: (id: string) => void;
 
@@ -115,6 +116,16 @@ export const useClassroomStore = create<ClassroomState>()(
         const id = uid();
         set((s) => mutateAndRecord(s, (c) => ({ ...c, walls: [...c.walls, { ...wall, id }] })));
         return id;
+      },
+
+      // מוסיף מספר קירות בפעולה אחת (snapshot יחיד לundo)
+      addWalls: (walls) => {
+        const ids = walls.map(() => uid());
+        set((s) => mutateAndRecord(s, (c) => ({
+          ...c,
+          walls: [...c.walls, ...walls.map((w, i) => ({ ...w, id: ids[i] }))],
+        })));
+        return ids;
       },
 
       updateWall: (id, patch) =>

@@ -75,6 +75,7 @@ function wallIntersectsRect(w: Wall, r: { x1: number; y1: number; x2: number; y2
 export default function RoomEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const addWall = useClassroomStore((s) => s.addWall);
+  const addWalls = useClassroomStore((s) => s.addWalls);
   const removeWall = useClassroomStore((s) => s.removeWall);
   const updateWall = useClassroomStore((s) => s.updateWall);
   const addFixedElement = useClassroomStore((s) => s.addFixedElement);
@@ -110,7 +111,7 @@ export default function RoomEditor({ classroomId }: Props) {
   // תצוגה מקדימה של דלת בריחוף מעל קיר
   const [doorPreview, setDoorPreview] = useState<{ p1: Point; p2: Point } | null>(null);
 
-  // מודאל כיתה גנרית
+  // מודאל בניית כיתה רגילה
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [tplRows, setTplRows] = useState(4);
   const [tplCols, setTplCols] = useState(5);
@@ -205,7 +206,7 @@ export default function RoomEditor({ classroomId }: Props) {
       clearAll();
     }
     const tpl = buildGenericClassroom(tplRows, tplCols, classroom.width, classroom.height);
-    tpl.walls.forEach((w) => addWall(w));
+    addWalls(tpl.walls);
     tpl.fixedElements.forEach((el) => addFixedElement(el));
     tpl.desks.forEach((d) => addDesk(d.desk, d.seats));
     setShowTemplateDialog(false);
@@ -256,12 +257,11 @@ export default function RoomEditor({ classroomId }: Props) {
             bottomRight = { x: Math.max(shapeStart.x, p.x), y: Math.max(shapeStart.y, p.y) };
           }
           if (tool === 'shape_rect') {
-            buildRectWalls(topLeft, bottomRight).forEach((w) => addWall(w));
+            addWalls(buildRectWalls(topLeft, bottomRight));
           } else if (tool === 'shape_l') {
             const w = bottomRight.x - topLeft.x;
             const h = bottomRight.y - topLeft.y;
-            buildLRoomWalls(topLeft, { w, h, notchW: Math.round(w * 0.28), notchH: Math.round(h * 0.28) })
-              .forEach((wall) => addWall(wall));
+            addWalls(buildLRoomWalls(topLeft, { w, h, notchW: Math.round(w * 0.28), notchH: Math.round(h * 0.28) }));
           }
         }
       }
@@ -666,7 +666,7 @@ export default function RoomEditor({ classroomId }: Props) {
             cursor: 'pointer', fontFamily: 'inherit',
             display: 'flex', alignItems: 'center', gap: 6,
           }}>
-          <span style={{ fontSize: 16 }}>🏫</span><span>כיתה גנרית</span>
+          <span style={{ fontSize: 16 }}>🏫</span><span>בניית כיתה רגילה</span>
         </button>
         <div style={{ width: 1, height: 28, background: 'var(--bd2)' }} />
         <ToolButton id="teacher_desk_single" label="שולחן מורה" emoji="🪑" />
@@ -815,7 +815,7 @@ export default function RoomEditor({ classroomId }: Props) {
         </div>
       </div>
 
-      {/* ── מודאל כיתה גנרית ── */}
+      {/* ── מודאל בניית כיתה רגילה ── */}
       {showTemplateDialog && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 100,
@@ -825,13 +825,13 @@ export default function RoomEditor({ classroomId }: Props) {
             background: 'var(--bg2)', borderRadius: 'var(--r)', padding: 28,
             maxWidth: 480, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
           }}>
-            <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 8px' }}>🏫 כיתה גנרית</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 800, margin: '0 0 8px' }}>🏫 בניית כיתה רגילה</h2>
             <p style={{ fontSize: 13, color: 'var(--ink2)', margin: '0 0 20px' }}>
               חדר מלבני עם לוח בתחתית, שולחן מורה ליד הלוח, וגריד שולחנות זוגיים.
             </p>
             <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
               <label style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>שורות (מלמעלה למטה)</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>שורות (מימין לשמאל)</div>
                 <input type="number" min={1} max={10} value={tplRows}
                   onChange={(e) => setTplRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
                   style={{
@@ -841,7 +841,7 @@ export default function RoomEditor({ classroomId }: Props) {
                   }} />
               </label>
               <label style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>טורים (מימין לשמאל)</div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>טורים (מלמעלה למטה)</div>
                 <input type="number" min={1} max={10} value={tplCols}
                   onChange={(e) => setTplCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
                   style={{

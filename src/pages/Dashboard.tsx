@@ -33,7 +33,7 @@ export default function Dashboard() {
     }
     setShowNew(false);
     setNewName('');
-    navigate(`/classroom/${id}/setup`);
+    navigate(`/classroom/${id}/seating`);
   };
 
   return (
@@ -90,7 +90,7 @@ export default function Dashboard() {
                 style={{ width: 18, height: 18 }}
               />
               <span style={{ fontWeight: 800, fontSize: 14, color: '#9a3412' }}>
-                התחל עם תבנית כיתה גנרית (מומלץ)
+                התחל עם תבנית בניית כיתה רגילה (מומלץ)
               </span>
             </label>
             <div style={{ fontSize: 12, color: '#9a3412', marginBottom: withTemplate ? 12 : 0 }}>
@@ -101,7 +101,7 @@ export default function Dashboard() {
               <div style={{ display: 'flex', gap: 12 }}>
                 <label style={{ flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>
-                    שורות (מלמעלה למטה)
+                    שורות (מימין לשמאל)
                   </div>
                   <input
                     type="number" min={1} max={10} value={tplRows}
@@ -115,7 +115,7 @@ export default function Dashboard() {
                 </label>
                 <label style={{ flex: 1 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>
-                    טורים (מימין לשמאל)
+                    טורים (מלמעלה למטה)
                   </div>
                   <input
                     type="number" min={1} max={10} value={tplCols}
@@ -179,7 +179,7 @@ export default function Dashboard() {
                 padding: 16, boxShadow: 'var(--sh)', cursor: 'pointer',
                 transition: 'transform .1s, box-shadow .1s',
               }}
-              onClick={() => { setCurrent(c.id); navigate(`/classroom/${c.id}/setup`); }}
+              onClick={() => { setCurrent(c.id); navigate(`/classroom/${c.id}/seating`); }}
               onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = 'var(--shl)'; }}
               onMouseLeave={(e) => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'var(--sh)'; }}
             >

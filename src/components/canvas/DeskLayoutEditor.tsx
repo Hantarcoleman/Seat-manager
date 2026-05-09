@@ -186,6 +186,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   // rubber-band selection
   const [rubberStart, setRubberStart] = useState<Point | null>(null);
   const [rubberEnd, setRubberEnd] = useState<Point | null>(null);
+  const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
 
   const stageRef = useRef<Konva.Stage>(null);
 
@@ -363,7 +364,20 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           e.cancelBubble = true;
           setSelectedIds(new Set([desk.id]));
         }}
+        onDragMove={(e) => {
+          const cx = e.target.x();
+          const cy = e.target.y();
+          const vLines: number[] = [];
+          const hLines: number[] = [];
+          classroom.desks.forEach((other) => {
+            if (other.id === desk.id) return;
+            if (Math.abs(other.position.x - cx) <= SNAP_THRESHOLD) vLines.push(other.position.x);
+            if (Math.abs(other.position.y - cy) <= SNAP_THRESHOLD) hLines.push(other.position.y);
+          });
+          setSnapGuides({ vLines, hLines });
+        }}
         onDragEnd={(e) => {
+          setSnapGuides({ vLines: [], hLines: [] });
           const deskW = desk.seatCount === 2 ? 130 : 80;
           const halfW = deskW / 2;
           const halfH = 35;
@@ -415,6 +429,24 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           );
         })}
       </Group>
+    );
+  };
+
+  const SNAP_THRESHOLD = 12;
+
+  const renderSnapGuides = () => {
+    if (snapGuides.vLines.length === 0 && snapGuides.hLines.length === 0) return null;
+    return (
+      <>
+        {snapGuides.vLines.map((x, i) => (
+          <Line key={`sv${i}`} points={[x, 0, x, classroom.height]}
+                stroke="#ea580c" strokeWidth={1.5} dash={[8, 5]} listening={false} opacity={0.7} />
+        ))}
+        {snapGuides.hLines.map((y, i) => (
+          <Line key={`sh${i}`} points={[0, y, classroom.width, y]}
+                stroke="#ea580c" strokeWidth={1.5} dash={[8, 5]} listening={false} opacity={0.7} />
+        ))}
+      </>
     );
   };
 
@@ -637,6 +669,7 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
               {classroom.walls.map(renderWall)}
               {classroom.fixedElements.map(renderTeacherDesk)}
               {classroom.desks.map(renderDesk)}
+              {renderSnapGuides()}
               {renderPreview()}
               {renderRubberBand()}
             </Layer>
