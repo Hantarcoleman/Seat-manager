@@ -6,9 +6,9 @@ import { useRequestsStore } from '../store/requestsStore';
 import ClassroomNav from '../components/canvas/ClassroomNav';
 import type { SeatRequest, SeatRequestStatus, SharedClassroomData } from '../types';
 
-// מקודד את נתוני הכיתה לשיתוף עם תלמידים
+// מקודד Unicode-safe — btoa לבדו נכשל על עברית
 function encodeShareData(data: SharedClassroomData): string {
-  return btoa(JSON.stringify(data));
+  return btoa(encodeURIComponent(JSON.stringify(data)));
 }
 
 // מפענח בקשה שהגיעה ב-URL מתלמיד
@@ -19,7 +19,7 @@ function decodeIncomingRequest(raw: string): {
   message: string;
 } | null {
   try {
-    return JSON.parse(atob(raw));
+    return JSON.parse(decodeURIComponent(atob(raw)));
   } catch {
     return null;
   }

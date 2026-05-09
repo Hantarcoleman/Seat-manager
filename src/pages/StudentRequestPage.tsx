@@ -2,10 +2,10 @@ import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { SharedClassroomData } from '../types';
 
-// מפענח את נתוני הכיתה מ-URL
+// מפענח Unicode-safe — btoa לבדו נכשל על עברית
 function decodeShareData(raw: string): SharedClassroomData | null {
   try {
-    return JSON.parse(atob(raw)) as SharedClassroomData;
+    return JSON.parse(decodeURIComponent(atob(raw))) as SharedClassroomData;
   } catch {
     return null;
   }
@@ -20,7 +20,7 @@ function encodeRequestUrl(
 ): string {
   const payload = JSON.stringify({ classroomId, requesterName, preferredNear, message });
   const base = window.location.href.split('#')[0];
-  return `${base}#/classroom/${classroomId}/requests?req=${btoa(payload)}`;
+  return `${base}#/classroom/${classroomId}/requests?req=${btoa(encodeURIComponent(payload))}`;
 }
 
 export default function StudentRequestPage() {
