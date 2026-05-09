@@ -41,6 +41,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const clearPins = useArrangementStore((s) => s.clearPins);
   const pinnedSet = useMemo(() => new Set(pinnedStudentIds), [pinnedStudentIds]);
 
+  const [addStudentCounter, setAddStudentCounter] = useState(0);
   const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [draggedStudentId, setDraggedStudentId] = useState<string | null>(null);
   const [hoveredStudentId, setHoveredStudentId] = useState<string | null>(null);
@@ -419,6 +420,9 @@ export default function SeatingEditor({ classroomId }: Props) {
       classroomName: classroom.name,
       teacherName: user?.user_metadata?.full_name ?? user?.email,
       title: `סידור ישיבה — ${classroom.name}`,
+      walls: classroom.walls,
+      classroomWidth: classroom.width,
+      classroomHeight: classroom.height,
     });
   };
 
@@ -445,6 +449,53 @@ export default function SeatingEditor({ classroomId }: Props) {
     const style = WALL_STYLES[w.type] ?? WALL_STYLES.blank;
     const flat: number[] = [];
     w.points.forEach((p) => { flat.push(p.x, p.y); });
+
+    if (w.type === 'door') {
+      // דלת: חריץ לבן + סימוני קצה + תווית
+      const p0 = w.points[0];
+      const p1 = w.points[w.points.length - 1];
+      const midX = (p0.x + p1.x) / 2;
+      const midY = (p0.y + p1.y) / 2;
+      const dx = p1.x - p0.x, dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const perpX = -dy / len, perpY = dx / len;
+      const tickLen = 10;
+      const isHoriz = Math.abs(dx) > Math.abs(dy);
+      const labelX = isHoriz ? midX - 20 : (midX < classroom.width / 2 ? midX + 10 : midX - 50);
+      const labelY = isHoriz ? (midY < classroom.height / 2 ? midY + 10 : midY - 22) : midY - 9;
+      return (
+        <Group key={w.id} listening={false}>
+          <Line points={flat} stroke="#ffffff" strokeWidth={style.width + 4} lineCap="butt" />
+          <Line points={[p0.x + perpX * tickLen, p0.y + perpY * tickLen, p0.x - perpX * tickLen, p0.y - perpY * tickLen]}
+                stroke={style.color} strokeWidth={2.5} lineCap="round" />
+          <Line points={[p1.x + perpX * tickLen, p1.y + perpY * tickLen, p1.x - perpX * tickLen, p1.y - perpY * tickLen]}
+                stroke={style.color} strokeWidth={2.5} lineCap="round" />
+          <Text x={labelX} y={labelY} width={50} align="center"
+                text="דלת" fontSize={13} fontFamily="Heebo" fill={style.color} fontStyle="bold" />
+        </Group>
+      );
+    }
+
+    if (w.type === 'board') {
+      // לוח: קו + תווית "לוח" בתוך הכיתה
+      const xs = w.points.map((p) => p.x);
+      const ys = w.points.map((p) => p.y);
+      const midX = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const midY = (Math.min(...ys) + Math.max(...ys)) / 2;
+      const wdx = Math.max(...xs) - Math.min(...xs);
+      const wdy = Math.max(...ys) - Math.min(...ys);
+      const isHoriz = wdx > wdy;
+      const labelX = isHoriz ? midX - 30 : (midX < classroom.width / 2 ? midX + style.width / 2 + 4 : midX - 68);
+      const labelY = isHoriz ? (midY < classroom.height / 2 ? midY + style.width / 2 + 4 : midY - 24) : midY - 10;
+      return (
+        <Group key={w.id} listening={false}>
+          <Line points={flat} stroke={style.color} strokeWidth={style.width} lineCap="round" lineJoin="round" />
+          <Text x={labelX} y={labelY} width={60} align="center"
+                text="לוח" fontSize={15} fontFamily="Heebo" fill={style.color} fontStyle="bold" />
+        </Group>
+      );
+    }
+
     return (
       <Line key={w.id} points={flat} stroke={style.color} strokeWidth={style.width}
             dash={style.dash} lineCap="round" lineJoin="round" listening={false} />
@@ -461,8 +512,8 @@ export default function SeatingEditor({ classroomId }: Props) {
           <Rect x={-el.width / 2} y={el.height / 2} width={el.gammaArmLength} height={el.height * 0.7}
                 fill="#fef3c7" stroke="#92400e" strokeWidth={2} cornerRadius={4} />
         )}
-        <Text x={-el.width / 2} y={-8} width={el.width} align="center"
-              text="מורה" fontSize={11} fontFamily="Heebo" fill="#92400e" fontStyle="bold" />
+        <Text x={-el.width / 2} y={-11} width={el.width} align="center"
+              text="מורה" fontSize={17} fontFamily="Heebo" fill="#92400e" fontStyle="bold" />
       </Group>
     );
   };
@@ -857,6 +908,19 @@ export default function SeatingEditor({ classroomId }: Props) {
 
         {/* ── עמודה ימנית ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginTop: 90 }}>
+          {/* כפתור הוספת תלמיד */}
+          <button
+            onClick={() => { setRightPanel('students'); setAddStudentCounter((c) => c + 1); }}
+            style={{
+              background: 'var(--ac)', color: '#fff', border: 'none',
+              borderRadius: 'var(--rs)', padding: '9px 16px', fontWeight: 800, fontSize: 14,
+              cursor: 'pointer', fontFamily: 'inherit', marginBottom: 8,
+              display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center',
+            }}
+          >
+            ➕ הוספת תלמיד חדש
+          </button>
+
           {/* טאבים */}
           <div style={{
             display: 'flex', borderBottom: '2px solid var(--bd)', marginBottom: 12,
@@ -1244,7 +1308,11 @@ export default function SeatingEditor({ classroomId }: Props) {
           {/* ── פאנל תלמידים ── */}
           {rightPanel === 'students' && (
             <div style={{ minWidth: 0 }}>
-              <StudentManager classroomId={classroomId} />
+              <StudentManager
+                key={addStudentCounter}
+                classroomId={classroomId}
+                initialMode={addStudentCounter > 0 ? 'add' : 'list'}
+              />
             </div>
           )}
         </div>

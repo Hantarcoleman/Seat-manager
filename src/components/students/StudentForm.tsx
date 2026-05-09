@@ -9,6 +9,7 @@ interface Props {
   allStudents: Student[];
   onSave: (data: Omit<Student, 'id'>) => void;
   onCancel: () => void;
+  onDelete?: () => void;
 }
 
 // ── Autocomplete לבחירת תלמידים ────────────────────────────
@@ -164,7 +165,7 @@ function StudentAutocomplete({ value, onChange, label, color, students, currentI
   );
 }
 
-export default function StudentForm({ initial, allStudents, onSave, onCancel }: Props) {
+export default function StudentForm({ initial, allStudents, onSave, onCancel, onDelete }: Props) {
   const [name, setName] = useState(initial?.name ?? '');
   const [gender, setGender] = useState<'m' | 'f' | ''>(initial?.gender ?? '');
   const [tags, setTags] = useState<StudentTag[]>(initial?.tags ?? []);
@@ -324,25 +325,40 @@ export default function StudentForm({ initial, allStudents, onSave, onCancel }: 
         />
       </div>
 
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button onClick={onCancel}
-          style={{
-            background: 'transparent', color: 'var(--ink2)',
-            border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
-            padding: '8px 18px', fontWeight: 700, fontSize: 14,
-            cursor: 'pointer', fontFamily: 'inherit',
-          }}>
-          ביטול
-        </button>
-        <button onClick={submit} disabled={!name.trim()}
-          style={{
-            background: 'var(--ac)', color: '#fff', border: 'none',
-            borderRadius: 'var(--rs)', padding: '8px 22px', fontWeight: 800, fontSize: 14,
-            cursor: name.trim() ? 'pointer' : 'not-allowed',
-            opacity: name.trim() ? 1 : 0.5, fontFamily: 'inherit',
-          }}>
-          שמור
-        </button>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        {initial?.id && onDelete && (
+          <button
+            onClick={() => { if (confirm(`למחוק את ${initial.name ?? 'תלמיד זה'}?`)) onDelete(); }}
+            style={{
+              background: 'transparent', color: '#dc2626',
+              border: '1.5px solid #fecaca', borderRadius: 'var(--rs)',
+              padding: '8px 14px', fontWeight: 700, fontSize: 13,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            🗑 מחק תלמיד
+          </button>
+        )}
+        <div style={{ marginRight: 'auto', display: 'flex', gap: 8 }}>
+          <button onClick={onCancel}
+            style={{
+              background: 'transparent', color: 'var(--ink2)',
+              border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+              padding: '8px 18px', fontWeight: 700, fontSize: 14,
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}>
+            ביטול
+          </button>
+          <button onClick={submit} disabled={!name.trim()}
+            style={{
+              background: 'var(--ac)', color: '#fff', border: 'none',
+              borderRadius: 'var(--rs)', padding: '8px 22px', fontWeight: 800, fontSize: 14,
+              cursor: name.trim() ? 'pointer' : 'not-allowed',
+              opacity: name.trim() ? 1 : 0.5, fontFamily: 'inherit',
+            }}>
+            שמור
+          </button>
+        </div>
       </div>
     </div>
   );

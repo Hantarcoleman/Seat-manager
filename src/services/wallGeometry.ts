@@ -51,7 +51,7 @@ interface EmbedResult {
 // מחפש קיר שעליו אפשר להטמיע את הדלת (לחיצה אחת)
 // אם נמצא — מחזיר את ההוראות לחיתוך + יצירת 2-3 קירות חדשים.
 // הדלת תהיה מיושרת לכיוון הקיר, באורך ~60px.
-export function tryEmbedDoor(walls: Wall[], clickPoint: Point, doorLength = 60): EmbedResult | null {
+export function tryEmbedDoor(walls: Wall[], clickPoint: Point, doorLength = 25): EmbedResult | null {
   let bestWall: Wall | null = null;
   let bestProj: ProjectionResult | null = null;
   for (const wall of walls) {
@@ -68,7 +68,7 @@ export function tryEmbedDoor(walls: Wall[], clickPoint: Point, doorLength = 60):
   const segStart = bestWall.points[bestProj.segIdx];
   const segEnd = bestWall.points[bestProj.segIdx + 1];
   const segLen = dist(segStart, segEnd);
-  if (segLen < doorLength + 10) return null; // הקטע קצר מדי
+  if (segLen < doorLength + 6) return null; // הקטע קצר מדי
 
   const half = (doorLength / 2) / segLen;
   let t1 = bestProj.t - half;

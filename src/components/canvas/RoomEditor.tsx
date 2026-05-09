@@ -404,6 +404,75 @@ export default function RoomEditor({ classroomId }: Props) {
     const isSelected = selectedWallIds.has(w.id);
     const flat: number[] = [];
     w.points.forEach((p) => { flat.push(p.x, p.y); });
+
+    const clickHandlers = {
+      onClick: (e: Konva.KonvaEventObject<MouseEvent>) => {
+        e.cancelBubble = true;
+        if (e.evt.shiftKey) {
+          const next = new Set(selectedWallIds);
+          if (next.has(w.id)) next.delete(w.id); else next.add(w.id);
+          setSelectedWallIds(next);
+        } else {
+          setSelectedWallIds(new Set([w.id]));
+          setSelectedFixedIds(new Set());
+        }
+      },
+      onTap: (e: Konva.KonvaEventObject<Event>) => {
+        e.cancelBubble = true;
+        setSelectedWallIds(new Set([w.id]));
+        setSelectedFixedIds(new Set());
+      },
+    };
+
+    const handles = isSelected && selectedWallIds.size === 1 ? w.points.map((p, i) => (
+      <Circle
+        key={`h${i}`}
+        x={p.x} y={p.y} radius={6}
+        fill="#fff" stroke="#ea580c" strokeWidth={2}
+        draggable
+        onDragMove={(e) => {
+          const newPoints = w.points.map((pp, j) =>
+            j === i ? { x: snap(e.target.x(), gridOn), y: snap(e.target.y(), gridOn) } : pp
+          );
+          updateWall(w.id, { points: newPoints });
+        }}
+      />
+    )) : null;
+
+    if (w.type === 'door') {
+      // חריץ: קו לבן למחיקת הקיר + סימוני קצה + תווית "דלת"
+      const p0 = w.points[0];
+      const p1 = w.points[w.points.length - 1];
+      const midX = (p0.x + p1.x) / 2;
+      const midY = (p0.y + p1.y) / 2;
+      const dx = p1.x - p0.x, dy = p1.y - p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const perpX = -dy / len, perpY = dx / len;
+      const tickLen = 10;
+      const isHoriz = Math.abs(dx) > Math.abs(dy);
+      const labelX = isHoriz ? midX - 20 : (midX < classroom.width / 2 ? midX + 12 : midX - 52);
+      const labelY = isHoriz ? (midY < classroom.height / 2 ? midY + 12 : midY - 24) : midY - 10;
+      return (
+        <Group key={w.id}>
+          {/* חריץ לבן */}
+          <Line points={flat} stroke="#ffffff" strokeWidth={style.width + 4} lineCap="butt" listening={false} />
+          {/* סימוני קצה */}
+          <Line points={[p0.x + perpX * tickLen, p0.y + perpY * tickLen, p0.x - perpX * tickLen, p0.y - perpY * tickLen]}
+                stroke={style.color} strokeWidth={isSelected ? 4 : 2.5} lineCap="round" listening={false} />
+          <Line points={[p1.x + perpX * tickLen, p1.y + perpY * tickLen, p1.x - perpX * tickLen, p1.y - perpY * tickLen]}
+                stroke={style.color} strokeWidth={isSelected ? 4 : 2.5} lineCap="round" listening={false} />
+          {/* תווית דלת */}
+          <Text x={labelX} y={labelY} width={50} align="center"
+                text="דלת" fontSize={13} fontFamily="Heebo" fill={style.color} fontStyle="bold" listening={false} />
+          {/* אזור לחיצה בלתי נראה */}
+          <Line points={flat} stroke="transparent" strokeWidth={1}
+                hitStrokeWidth={Math.max(28, style.width + 20)} lineCap="round"
+                {...clickHandlers} />
+          {handles}
+        </Group>
+      );
+    }
+
     return (
       <Group key={w.id}>
         {/* קו אחד עם hitStrokeWidth רחב לקליטת לחיצות בצורה אמינה */}
@@ -414,37 +483,9 @@ export default function RoomEditor({ classroomId }: Props) {
           hitStrokeWidth={Math.max(24, style.width + 18)}
           dash={style.dash}
           lineCap="round" lineJoin="round"
-          onClick={(e) => {
-            e.cancelBubble = true;
-            if (e.evt.shiftKey) {
-              const next = new Set(selectedWallIds);
-              if (next.has(w.id)) next.delete(w.id); else next.add(w.id);
-              setSelectedWallIds(next);
-            } else {
-              setSelectedWallIds(new Set([w.id]));
-              setSelectedFixedIds(new Set());
-            }
-          }}
-          onTap={(e) => {
-            e.cancelBubble = true;
-            setSelectedWallIds(new Set([w.id]));
-            setSelectedFixedIds(new Set());
-          }}
+          {...clickHandlers}
         />
-        {isSelected && selectedWallIds.size === 1 && w.points.map((p, i) => (
-          <Circle
-            key={`h${i}`}
-            x={p.x} y={p.y} radius={6}
-            fill="#fff" stroke="#ea580c" strokeWidth={2}
-            draggable
-            onDragMove={(e) => {
-              const newPoints = w.points.map((pp, j) =>
-                j === i ? { x: snap(e.target.x(), gridOn), y: snap(e.target.y(), gridOn) } : pp
-              );
-              updateWall(w.id, { points: newPoints });
-            }}
-          />
-        ))}
+        {handles}
       </Group>
     );
   };

@@ -11,9 +11,9 @@ function isCharacterized(s: Student): boolean {
   return s.configured === true;
 }
 
-interface Props { classroomId: string; }
+interface Props { classroomId: string; initialMode?: 'list' | 'add'; }
 
-export default function StudentManager({ classroomId }: Props) {
+export default function StudentManager({ classroomId, initialMode }: Props) {
   const studentsByClassroom = useStudentsStore((s) => s.byClassroom);
   const addStudent = useStudentsStore((s) => s.add);
   const updateStudent = useStudentsStore((s) => s.update);
@@ -22,7 +22,7 @@ export default function StudentManager({ classroomId }: Props) {
 
   const students = studentsByClassroom[classroomId] ?? [];
 
-  const [mode, setMode] = useState<'list' | 'add' | 'edit' | 'import'>('list');
+  const [mode, setMode] = useState<'list' | 'add' | 'edit' | 'import'>(initialMode ?? 'list');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [filterTag, setFilterTag] = useState<StudentTag | ''>('');
@@ -98,6 +98,7 @@ export default function StudentManager({ classroomId }: Props) {
         initial={editing} allStudents={students}
         onSave={onSaveEdit}
         onCancel={() => { setMode('list'); setEditingId(null); }}
+        onDelete={() => { removeStudent(classroomId, editingId!); setMode('list'); setEditingId(null); }}
       />
     );
   }
@@ -587,11 +588,17 @@ export default function StudentManager({ classroomId }: Props) {
             const nameColor = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
             const characterized = isCharacterized(s);
             return (
-              <div key={s.id} style={{
-                background: cardBg, border: `1.5px solid ${cardBorder}`, borderRadius: 'var(--r)',
-                padding: 12, boxShadow: 'var(--sh)', display: 'flex', flexDirection: 'column', gap: 6,
-                position: 'relative',
-              }}>
+              <div
+                key={s.id}
+                onClick={() => { setEditingId(s.id); setMode('edit'); }}
+                style={{
+                  background: cardBg, border: `1.5px solid ${cardBorder}`, borderRadius: 'var(--r)',
+                  padding: 12, boxShadow: 'var(--sh)', display: 'flex', flexDirection: 'column', gap: 6,
+                  position: 'relative', cursor: 'pointer', transition: 'box-shadow 0.15s',
+                }}
+                onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 12px rgba(0,0,0,.12)'; }}
+                onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.boxShadow = 'var(--sh)'; }}
+              >
                 <div style={{
                   position: 'absolute', top: 8, left: 8,
                   background: characterized ? '#dcfce7' : '#fef3c7',
@@ -621,7 +628,7 @@ export default function StudentManager({ classroomId }: Props) {
                       return (
                         <span
                           key={t}
-                          onClick={() => setTagMode(t as StudentTag)}
+                          onClick={(e) => { e.stopPropagation(); setTagMode(t as StudentTag); }}
                           title="לחץ לסימון קבוצתי"
                           style={{
                             fontSize: 10, fontWeight: 600, padding: '2px 6px',
@@ -642,30 +649,7 @@ export default function StudentManager({ classroomId }: Props) {
                     {s.avoidNear.length > 0 && <span>⚠ {s.avoidNear.length}</span>}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 6, marginTop: 4 }}>
-                  <button
-                    onClick={() => { setEditingId(s.id); setMode('edit'); }}
-                    style={{
-                      background: 'var(--bg2)', color: 'var(--ink)',
-                      border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
-                      padding: '4px 10px', fontSize: 12, fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    ✏ ערוך
-                  </button>
-                  <button
-                    onClick={() => { if (confirm(`למחוק את ${s.name}?`)) removeStudent(classroomId, s.id); }}
-                    style={{
-                      background: 'var(--bg2)', color: '#dc2626',
-                      border: '1px solid #fecaca', borderRadius: 'var(--rs)',
-                      padding: '4px 10px', fontSize: 12, fontWeight: 700,
-                      cursor: 'pointer', fontFamily: 'inherit',
-                    }}
-                  >
-                    🗑
-                  </button>
-                </div>
+                <div style={{ fontSize: 11, color: 'var(--ink3)', marginTop: 2 }}>לחץ לעריכה ואפיון ✏</div>
               </div>
             );
           })}
