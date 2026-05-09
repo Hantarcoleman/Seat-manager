@@ -135,96 +135,97 @@ function drawWallLabels(
   ctx.restore();
 }
 
-export function exportSeatsPdf(stage: Konva.Stage, opts: PdfOptions): void {
-  const PIXEL_RATIO = 2;
-  const stageW = stage.width();
-  const stageH = stage.height();
+function buildSeatsCanvas(stage: Konva.Stage, opts: PdfOptions): Promise<HTMLCanvasElement> {
+  return new Promise((resolve) => {
+    const PIXEL_RATIO = 2;
+    const stageW = stage.width();
+    const stageH = stage.height();
 
-  // הסתרת נעיצות לצורך הדפסה נקייה
-  const pinNodes = stage.find('.pin');
-  pinNodes.forEach((n) => n.hide());
-  const imgData = stage.toDataURL({ pixelRatio: PIXEL_RATIO });
-  pinNodes.forEach((n) => n.show());
+    const pinNodes = stage.find('.pin');
+    pinNodes.forEach((n) => n.hide());
+    const imgData = stage.toDataURL({ pixelRatio: PIXEL_RATIO });
+    pinNodes.forEach((n) => n.show());
 
-  const LABEL_MARGIN = 52;   // שוליים לתוויות קירות (px ב-1x)
-  const HEADER_H = 72;       // גובה הכותרת (px ב-1x)
-  const OUTER_MARGIN = 20;   // שוליים חיצוניים
+    const LABEL_MARGIN = 52;
+    const HEADER_H = 72;
+    const OUTER_MARGIN = 20;
 
-  // גודל הקנבס המרוכב (ב-1x לפני scale)
-  const totalW = stageW + 2 * (LABEL_MARGIN + OUTER_MARGIN);
-  const totalH = stageH + 2 * (LABEL_MARGIN + OUTER_MARGIN) + HEADER_H;
+    const totalW = stageW + 2 * (LABEL_MARGIN + OUTER_MARGIN);
+    const totalH = stageH + 2 * (LABEL_MARGIN + OUTER_MARGIN) + HEADER_H;
 
-  const stageOffX = OUTER_MARGIN + LABEL_MARGIN;
-  const stageOffY = HEADER_H + OUTER_MARGIN + LABEL_MARGIN;
+    const stageOffX = OUTER_MARGIN + LABEL_MARGIN;
+    const stageOffY = HEADER_H + OUTER_MARGIN + LABEL_MARGIN;
 
-  const canvas = document.createElement('canvas');
-  canvas.width  = totalW * PIXEL_RATIO;
-  canvas.height = totalH * PIXEL_RATIO;
-  const ctx = canvas.getContext('2d')!;
-  ctx.scale(PIXEL_RATIO, PIXEL_RATIO);
+    const canvas = document.createElement('canvas');
+    canvas.width  = totalW * PIXEL_RATIO;
+    canvas.height = totalH * PIXEL_RATIO;
+    const ctx = canvas.getContext('2d')!;
+    ctx.scale(PIXEL_RATIO, PIXEL_RATIO);
 
-  // רקע לבן
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, totalW, totalH);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, totalW, totalH);
 
-  const img = new Image();
-  img.onload = () => {
-    // תמונת הכיתה
-    ctx.drawImage(img, stageOffX, stageOffY, stageW, stageH);
+    const img = new Image();
+    img.onload = () => {
+      ctx.drawImage(img, stageOffX, stageOffY, stageW, stageH);
 
-    // מסגרת קירות עם חריגה קלה לשוליים
-    ctx.strokeStyle = '#9ca3af';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(stageOffX, stageOffY, stageW, stageH);
+      ctx.strokeStyle = '#9ca3af';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(stageOffX, stageOffY, stageW, stageH);
 
-    // ── כותרת (Hebrew via canvas — ללא ג'יבריש) ──
-    const dateStr = new Date().toLocaleDateString('he-IL', {
-      year: 'numeric', month: 'long', day: 'numeric',
-    });
-    const className = opts.classroomName || opts.title || '';
+      const dateStr = new Date().toLocaleDateString('he-IL', {
+        year: 'numeric', month: 'long', day: 'numeric',
+      });
+      const className = opts.classroomName || opts.title || '';
 
-    ctx.save();
-    ctx.direction = 'rtl';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'alphabetic';
+      ctx.save();
+      ctx.direction = 'rtl';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'alphabetic';
 
-    ctx.font = 'bold 30px Arial, Heebo, sans-serif';
-    ctx.fillStyle = '#1c1917';
-    ctx.fillText(className, totalW - OUTER_MARGIN, HEADER_H / 2 + 4);
+      ctx.font = 'bold 30px Arial, Heebo, sans-serif';
+      ctx.fillStyle = '#1c1917';
+      ctx.fillText(className, totalW - OUTER_MARGIN, HEADER_H / 2 + 4);
 
-    ctx.font = '18px Arial, Heebo, sans-serif';
-    ctx.fillStyle = '#6b7280';
-    ctx.fillText(dateStr, totalW - OUTER_MARGIN, HEADER_H / 2 + 30);
-
-    if (opts.teacherName) {
-      ctx.textAlign = 'left';
-      ctx.font = '16px Arial, Heebo, sans-serif';
+      ctx.font = '18px Arial, Heebo, sans-serif';
       ctx.fillStyle = '#6b7280';
-      ctx.fillText(opts.teacherName, OUTER_MARGIN, HEADER_H / 2 + 30);
-    }
-    ctx.restore();
+      ctx.fillText(dateStr, totalW - OUTER_MARGIN, HEADER_H / 2 + 30);
 
-    // קו הפרדה
-    ctx.strokeStyle = '#d1d5db';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(OUTER_MARGIN, HEADER_H);
-    ctx.lineTo(totalW - OUTER_MARGIN, HEADER_H);
-    ctx.stroke();
+      if (opts.teacherName) {
+        ctx.textAlign = 'left';
+        ctx.font = '16px Arial, Heebo, sans-serif';
+        ctx.fillStyle = '#6b7280';
+        ctx.fillText(opts.teacherName, OUTER_MARGIN, HEADER_H / 2 + 30);
+      }
+      ctx.restore();
 
-    // ── תוויות קירות בשוליים ──
-    if (opts.walls && opts.walls.length > 0) {
-      drawWallLabels(ctx, opts.walls, stageW, stageH, stageOffX, stageOffY, LABEL_MARGIN);
-    }
+      ctx.strokeStyle = '#d1d5db';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(OUTER_MARGIN, HEADER_H);
+      ctx.lineTo(totalW - OUTER_MARGIN, HEADER_H);
+      ctx.stroke();
 
-    // ── ייצוא ל-PDF ──
+      if (opts.walls && opts.walls.length > 0) {
+        drawWallLabels(ctx, opts.walls, stageW, stageH, stageOffX, stageOffY, LABEL_MARGIN);
+      }
+
+      resolve(canvas);
+    };
+    img.src = imgData;
+  });
+}
+
+export function exportSeatsPdf(stage: Konva.Stage, opts: PdfOptions): void {
+  buildSeatsCanvas(stage, opts).then((canvas) => {
     const finalDataUrl = canvas.toDataURL('image/png');
+    const totalW = canvas.width / 2;  // חזרה ל-1x
+    const totalH = canvas.height / 2;
     const orientation = totalW >= totalH ? 'landscape' : 'portrait';
     const pdf = new jsPDF({ orientation, unit: 'mm', format: 'a4' });
     const pageW = pdf.internal.pageSize.getWidth();
     const pageH = pdf.internal.pageSize.getHeight();
 
-    // מרכז את התמונה בעמוד תוך שמירה על יחס גובה-רוחב
     const ratio = totalW / totalH;
     let imgW = pageW, imgH = pageW / ratio;
     if (imgH > pageH) { imgH = pageH; imgW = pageH * ratio; }
@@ -234,6 +235,13 @@ export function exportSeatsPdf(stage: Konva.Stage, opts: PdfOptions): void {
     pdf.addImage(finalDataUrl, 'PNG', marginX, marginY, imgW, imgH);
     const safeName = (opts.classroomName || 'seating').replace(/\s+/g, '_');
     pdf.save(`seating-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`);
-  };
-  img.src = imgData;
+  });
+}
+
+export function exportSeatsImageBlob(stage: Konva.Stage, opts: PdfOptions): Promise<Blob> {
+  return buildSeatsCanvas(stage, opts).then(
+    (canvas) => new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png')
+    )
+  );
 }

@@ -7,7 +7,7 @@ import { useArrangementStore } from '../../store/arrangementStore';
 import { useAuthStore } from '../../store/authStore';
 import { validateAssignments, scoreArrangement } from '../../services/seatingValidator';
 import { generateSeatingArrangement } from '../../services/seatingAlgorithm';
-import { exportSeatsPdf } from '../../services/pdfExportService';
+import { exportSeatsPdf, exportSeatsImageBlob } from '../../services/pdfExportService';
 import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncService';
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
@@ -67,6 +67,8 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [studentPanelKey, setStudentPanelKey] = useState(0);
   const [studentAddMode, setStudentAddMode] = useState(false);
   const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportBtnRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
 
   const user = useAuthStore((s) => s.user);
@@ -420,6 +422,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   };
 
   const exportPdf = () => {
+    setShowExportMenu(false);
     if (!stageRef.current || !classroom) return;
     exportSeatsPdf(stageRef.current, {
       classroomName: classroom.name,
@@ -430,6 +433,87 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
       classroomHeight: classroom.height,
     });
   };
+
+  const getExportBlob = () => {
+    if (!stageRef.current || !classroom) return null;
+    return exportSeatsImageBlob(stageRef.current, {
+      classroomName: classroom.name,
+      teacherName: user?.user_metadata?.full_name ?? user?.email,
+      walls: classroom.walls,
+      classroomWidth: classroom.width,
+      classroomHeight: classroom.height,
+    });
+  };
+
+  const exportImage = async () => {
+    setShowExportMenu(false);
+    const blob = await getExportBlob();
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `סידור-ישיבה-${(classroom?.name ?? 'כיתה').replace(/\s+/g, '_')}.png`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const shareNative = async () => {
+    setShowExportMenu(false);
+    const blob = await getExportBlob();
+    if (!blob) return;
+    const fileName = `סידור-ישיבה-${(classroom?.name ?? 'כיתה').replace(/\s+/g, '_')}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: `סידור ישיבה — ${classroom?.name}` });
+    } else {
+      // fallback: הורד תמונה
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fileName; a.click();
+      URL.revokeObjectURL(url);
+    }
+  };
+
+  const shareEmail = async () => {
+    setShowExportMenu(false);
+    const blob = await getExportBlob();
+    if (!blob) return;
+    const fileName = `סידור-ישיבה-${(classroom?.name ?? 'כיתה').replace(/\s+/g, '_')}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: `סידור ישיבה — ${classroom?.name}` });
+    } else {
+      const subject = encodeURIComponent(`סידור ישיבה — ${classroom?.name ?? ''}`);
+      const body = encodeURIComponent(`מצורף סידור ישיבה לכיתה ${classroom?.name ?? ''}.\nתאריך: ${new Date().toLocaleDateString('he-IL')}`);
+      window.open(`mailto:?subject=${subject}&body=${body}`);
+    }
+  };
+
+  const shareWhatsApp = async () => {
+    setShowExportMenu(false);
+    const blob = await getExportBlob();
+    if (!blob) return;
+    const fileName = `סידור-ישיבה-${(classroom?.name ?? 'כיתה').replace(/\s+/g, '_')}.png`;
+    const file = new File([blob], fileName, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: `סידור ישיבה — ${classroom?.name}` });
+    } else {
+      const text = encodeURIComponent(`סידור ישיבה — ${classroom?.name ?? ''}\n${new Date().toLocaleDateString('he-IL')}`);
+      window.open(`https://wa.me/?text=${text}`);
+    }
+  };
+
+  // סגירת תפריט ייצוא בלחיצה מחוץ
+  useEffect(() => {
+    if (!showExportMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (exportBtnRef.current && !exportBtnRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showExportMenu]);
 
   const saveArrangement = async () => {
     if (!working) return;
@@ -765,18 +849,59 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
             >
               💾 שמור
             </button>
-            <button
-              onClick={exportPdf}
-              disabled={assignments.length === 0}
-              style={{
-                background: 'var(--bg2)', color: 'var(--ink)', border: '1.5px solid var(--bd)',
-                borderRadius: 'var(--rs)', padding: '8px 16px', fontWeight: 700, fontSize: 13,
-                cursor: assignments.length > 0 ? 'pointer' : 'not-allowed',
-                opacity: assignments.length > 0 ? 1 : 0.5, fontFamily: 'inherit',
-              }}
-            >
-              📄 PDF
-            </button>
+            <div ref={exportBtnRef} style={{ position: 'relative' }}>
+              <button
+                onClick={() => setShowExportMenu((v) => !v)}
+                disabled={assignments.length === 0}
+                style={{
+                  background: showExportMenu ? 'var(--ac)' : 'var(--bg2)',
+                  color: showExportMenu ? '#fff' : 'var(--ink)',
+                  border: `1.5px solid ${showExportMenu ? 'var(--ac)' : 'var(--bd)'}`,
+                  borderRadius: 'var(--rs)', padding: '8px 14px', fontWeight: 700, fontSize: 13,
+                  cursor: assignments.length > 0 ? 'pointer' : 'not-allowed',
+                  opacity: assignments.length > 0 ? 1 : 0.5, fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', gap: 7,
+                }}
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                  <polyline points="17 8 12 3 7 8"/>
+                  <line x1="12" y1="3" x2="12" y2="15"/>
+                </svg>
+                ייצא
+              </button>
+              {showExportMenu && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 300,
+                  background: '#fff', border: '1.5px solid var(--bd)', borderRadius: 10,
+                  boxShadow: '0 6px 24px rgba(0,0,0,.14)', minWidth: 190, overflow: 'hidden',
+                }}>
+                  {[
+                    { label: 'הורד PDF', sub: 'קובץ PDF למדפסת', icon: '📄', action: exportPdf },
+                    { label: 'הורד תמונה', sub: 'קובץ PNG למכשיר', icon: '🖼', action: exportImage },
+                    { label: 'שתף', sub: 'פתח תפריט שיתוף', icon: '📤', action: shareNative },
+                    { label: 'שלח במייל', sub: 'פתח לקוח מייל', icon: '✉️', action: shareEmail },
+                    { label: 'שלח בוואטסאפ', sub: 'פתח וואטסאפ', icon: '💬', action: shareWhatsApp },
+                  ].map(({ label, sub, icon, action }) => (
+                    <button key={label} onClick={action} style={{
+                      display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+                      padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer',
+                      fontFamily: 'inherit', textAlign: 'right', direction: 'rtl',
+                      borderBottom: '1px solid var(--bd)',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg2)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
+                    >
+                      <span style={{ fontSize: 18, lineHeight: 1 }}>{icon}</span>
+                      <span>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{label}</div>
+                        <div style={{ fontSize: 11, color: 'var(--ink3)' }}>{sub}</div>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button
               onClick={clearAllAssignments}
               disabled={assignments.length === 0}
