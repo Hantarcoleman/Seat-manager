@@ -4,7 +4,6 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import type { Wall, FixedElement, Point, Desk, Seat, ZoneTag } from '../../types';
 import { computeAllAutoZones } from '../../services/zoneCalculator';
-import { useZoomPan } from '../../hooks/useZoomPan';
 import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -189,8 +188,6 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const [rubberEnd, setRubberEnd] = useState<Point | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
 
-  const { zoom, offset, isPanRef, zoomToward, startPan, movePan, endPan, toCanvas, resetView } = useZoomPan();
-
   // multi-select drag
   const dragStartRef = useRef<{
     deskId: string; startX: number; startY: number;
@@ -235,29 +232,18 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
 
   // ── עכבר ──────────────────────────────────────────
   const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    // middle mouse — pan
-    if (e.evt.button === 1) {
-      e.evt.preventDefault();
-      const stage = stageRef.current;
-      if (!stage) return;
-      const pos = stage.getPointerPosition()!;
-      startPan(pos.x, pos.y);
-      return;
-    }
     if (e.target !== stageRef.current) return;
     if (!isSelectMode) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const p = toCanvas(pos.x, pos.y); // canvas coords
-    setRubberStart(p);
-    setRubberEnd(p);
+    setRubberStart({ x: pos.x, y: pos.y });
+    setRubberEnd({ x: pos.x, y: pos.y });
     if (!e.evt.shiftKey) setSelectedIds(new Set());
   };
 
   const onStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (endPan()) return;
     if (e.target !== stageRef.current) return;
     if (!isSelectMode || !rubberStart || !rubberEnd) {
       setRubberStart(null); setRubberEnd(null);
@@ -281,15 +267,13 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const DESK_MARGIN = 95;
 
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
-    if (isPanRef.current) return;
     if (e.target !== stageRef.current) return;
     if (isSelectMode) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const cp = toCanvas(pos.x, pos.y);
-    const center = { x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) };
+    const center = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
     const items = buildTemplate(template, center, cfg);
     items.forEach((item) => {
       const clamped = {
@@ -303,17 +287,15 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     });
   };
 
-  const onStageMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
+  const onStageMouseMove = () => {
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    if (movePan(pos.x, pos.y)) return;
-    const cp = toCanvas(pos.x, pos.y);
     if (isSelectMode && rubberStart) {
-      setRubberEnd(cp);
+      setRubberEnd({ x: pos.x, y: pos.y });
     } else {
-      setMousePos({ x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) });
+      setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
     }
   };
 
@@ -712,17 +694,6 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           danger
         />
         <ActionButton onClick={exportImage} emoji="💾" label="ייצא PNG" />
-        <div style={{ width: 1, height: 24, background: 'var(--bd2)' }} />
-        {/* פקדי זום */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1 / 1.2)}
-            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>−</button>
-          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink2)', minWidth: 38, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
-          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1.2)}
-            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>+</button>
-          <button onClick={resetView}
-            style={{ fontSize: 12, fontWeight: 700, padding: '4px 8px', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer', color: 'var(--ink2)' }}>איפוס</button>
-        </div>
         <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
           <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
             <strong>{classroom.desks.length}</strong> שולחנות · <strong>{classroom.seats.length}</strong> מושבים
@@ -754,15 +725,12 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
             ref={stageRef}
             width={classroom.width}
             height={classroom.height}
-            scaleX={zoom} scaleY={zoom}
-            x={offset.x} y={offset.y}
-            onWheel={(e) => { e.evt.preventDefault(); const pos = stageRef.current?.getPointerPosition(); if (pos) zoomToward(pos.x, pos.y, e.evt.deltaY < 0 ? 1.12 : 1 / 1.12); }}
             onMouseDown={onStageMouseDown}
             onMouseUp={onStageMouseUp}
             onClick={onStageClick}
             onTap={onStageClick}
             onMouseMove={onStageMouseMove}
-            style={{ cursor: isPanRef.current ? 'grab' : (isSelectMode ? 'default' : 'crosshair'), background: '#fff' }}
+            style={{ cursor: isSelectMode ? 'default' : 'crosshair', background: '#fff' }}
           >
             <Layer listening={false}>{renderGrid()}</Layer>
             <Layer>
