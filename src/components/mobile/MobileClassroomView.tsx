@@ -90,7 +90,7 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
         {/* תוכן */}
         <div style={{
           flex: 1, minHeight: 0, position: 'relative',
-          overflow: activeTab === 'seating' ? 'hidden' : 'auto',
+          overflow: activeTab === 'students' ? 'auto' : 'hidden',
         }}>
           {activeTab === 'room' && <RoomEditor classroomId={classroomId} isMobile />}
           {activeTab === 'desks' && <DeskLayoutEditor classroomId={classroomId} isMobile />}

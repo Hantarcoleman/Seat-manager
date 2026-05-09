@@ -195,6 +195,17 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
   } | null>(null);
 
   const stageRef = useRef<Konva.Stage>(null);
+  const mobileCanvasRef = useRef<HTMLDivElement>(null);
+  const [mobileCanvasH, setMobileCanvasH] = useState(window.innerHeight - 260);
+  useEffect(() => {
+    if (!isMobile || !mobileCanvasRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (r && r.height > 0) setMobileCanvasH(Math.round(r.height));
+    });
+    ro.observe(mobileCanvasRef.current);
+    return () => ro.disconnect();
+  }, [isMobile]);
 
   const isSelectMode = template === 'select';
 
@@ -613,9 +624,9 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
 
   // ── מצב מובייל ──────────────────────────────────────────────
   if (isMobile) {
-    const mobileScale = window.innerWidth / classroom.width;
+    const mobileScale = mobileCanvasH / classroom.height;
     const stageW = Math.round(classroom.width * mobileScale);
-    const stageH = Math.round(classroom.height * mobileScale);
+    const stageH = mobileCanvasH;
 
     const MOBILE_TEMPLATES: { type: TemplateType; emoji: string; label: string }[] = [
       { type: 'select',  emoji: '↖', label: 'בחר' },
@@ -628,11 +639,11 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
     ];
 
     return (
-      <div>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         {/* שורת תבניות */}
         <div style={{
           padding: '10px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
-          display: 'flex', gap: 8, overflowX: 'auto',
+          display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 0,
         }}>
           {MOBILE_TEMPLATES.map(({ type, emoji, label }) => {
             const active = template === type;
@@ -659,7 +670,7 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
         {!isSelectMode && (NEEDS_COUNT(template) || NEEDS_GRID(template)) && (
           <div style={{
             padding: '8px 12px', background: '#fff7ed', borderBottom: '1.5px solid #fed7aa',
-            display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto',
+            display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto', flexShrink: 0,
           }}>
             {NEEDS_COUNT(template) && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}>
@@ -695,7 +706,7 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
         )}
 
         {/* קנבס מסוקל */}
-        <div style={{ overflowX: 'hidden' }}>
+        <div ref={mobileCanvasRef} style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden' }}>
           <Stage
             ref={stageRef}
             width={stageW} height={stageH}
@@ -716,7 +727,7 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
         {/* פס פעולות תחתון */}
         <div style={{
           padding: '8px 12px', display: 'flex', gap: 8, background: 'var(--bg2)',
-          borderTop: '1px solid var(--bd)', overflowX: 'auto',
+          borderTop: '1px solid var(--bd)', overflowX: 'auto', flexShrink: 0,
         }}>
           <button onClick={undo} disabled={historyDepth === 0}
             style={{ flex: 1, padding: '10px 8px', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
@@ -746,7 +757,7 @@ export default function DeskLayoutEditor({ classroomId, isMobile = false }: Prop
         </div>
 
         {/* ספירת שולחנות */}
-        <div style={{ padding: '6px 14px', fontSize: 12, color: 'var(--ink3)', background: 'var(--bg2)' }}>
+        <div style={{ padding: '6px 14px', fontSize: 12, color: 'var(--ink3)', background: 'var(--bg2)', flexShrink: 0 }}>
           {classroom.desks.length} שולחנות · {classroom.seats.length} מושבים
           {selectedIds.size > 0 && <span style={{ color: 'var(--ac)', fontWeight: 700 }}> · {selectedIds.size} נבחרו</span>}
         </div>

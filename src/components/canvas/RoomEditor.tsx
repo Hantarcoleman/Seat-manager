@@ -121,6 +121,17 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
   const setCols = (v: number) => { setTplCols(v); localStorage.setItem('sg_tpl_cols', String(v)); };
 
   const stageRef = useRef<Konva.Stage>(null);
+  const mobileCanvasRef = useRef<HTMLDivElement>(null);
+  const [mobileCanvasH, setMobileCanvasH] = useState(window.innerHeight - 240);
+  useEffect(() => {
+    if (!isMobile || !mobileCanvasRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0]?.contentRect;
+      if (r && r.height > 0) setMobileCanvasH(Math.round(r.height));
+    });
+    ro.observe(mobileCanvasRef.current);
+    return () => ro.disconnect();
+  }, [isMobile]);
 
   const isSelectTool = tool === 'select';
   const isManualWallTool = tool === 'blank' || tool === 'board' || tool === 'window_lobby' || tool === 'window_yard' || tool === 'small_window';
@@ -663,9 +674,9 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
 
   // ── מצב מובייל ──────────────────────────────────────────────
   if (isMobile) {
-    const mobileScale = window.innerWidth / classroom.width;
+    const mobileScale = mobileCanvasH / classroom.height;
     const stageW = Math.round(classroom.width * mobileScale);
-    const stageH = Math.round(classroom.height * mobileScale);
+    const stageH = mobileCanvasH;
 
     const mobileBtn = (label: string, emoji: string, onClick: () => void, active = false, color?: string) => (
       <button
@@ -685,11 +696,11 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
     );
 
     return (
-      <div>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--bg)' }}>
         {/* שורת תבניות */}
         <div style={{
           padding: '10px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
-          display: 'flex', gap: 8, overflowX: 'auto',
+          display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 0,
         }}>
           {mobileBtn('בחירה', '↖', () => switchTool('select'), tool === 'select')}
           <div style={{ width: 1, flexShrink: 0, background: 'var(--bd2)', margin: '4px 0' }} />
@@ -704,7 +715,7 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
         {selectedWall && (
           <div style={{
             padding: '8px 12px', background: '#fff7ed', borderBottom: '1.5px solid #fed7aa',
-            display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'center',
+            display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'center', flexShrink: 0,
           }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: '#9a3412', flexShrink: 0 }}>סוג קיר:</span>
             {(Object.keys(WALL_STYLES) as WallType[]).map((wt) => (
@@ -725,7 +736,7 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
         )}
 
         {/* קנבס מסוקל */}
-        <div style={{ overflowX: 'hidden', overflowY: 'auto' }}>
+        <div ref={mobileCanvasRef} style={{ flex: 1, minHeight: 0, overflowX: 'auto', overflowY: 'hidden' }}>
           <Stage ref={stageRef}
             width={stageW} height={stageH}
             scaleX={mobileScale} scaleY={mobileScale}
@@ -746,7 +757,7 @@ export default function RoomEditor({ classroomId, isMobile = false }: Props) {
         </div>
 
         {/* ביטול / מחיקה */}
-        <div style={{ padding: '8px 12px', display: 'flex', gap: 8, background: 'var(--bg2)', borderTop: '1px solid var(--bd)' }}>
+        <div style={{ padding: '8px 12px', display: 'flex', gap: 8, background: 'var(--bg2)', borderTop: '1px solid var(--bd)', flexShrink: 0 }}>
           <button onClick={smartUndo} disabled={historyDepth === 0 && !drafting}
             style={{ flex: 1, padding: '10px', fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
               background: 'var(--bg)', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', cursor: 'pointer' }}>
