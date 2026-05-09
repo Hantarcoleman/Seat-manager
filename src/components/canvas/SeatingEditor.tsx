@@ -29,6 +29,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const updateDesk = useClassroomStore((s) => s.updateDesk);
   const addDesk = useClassroomStore((s) => s.addDesk);
+  const removeDesk = useClassroomStore((s) => s.removeDesk);
   const students = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
   const updateStudent = useStudentsStore((s) => s.update);
   const forbiddenGroups = useStudentsStore((s) => s.forbiddenGroups[classroomId] ?? []);
@@ -67,6 +68,11 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [studentPanelKey, setStudentPanelKey] = useState(0);
   const [studentAddMode, setStudentAddMode] = useState(false);
   const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
+  const [longPressDeskId, setLongPressDeskId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [selectedDeskId, setSelectedDeskId] = useState<string | null>(null);
+  const dragStartPosRef = useRef<{ x: number; y: number } | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportBtnRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
@@ -153,7 +159,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     for (const desk of classroom.desks) {
       const seats = classroom.seats.filter((s) => s.deskId === desk.id);
       for (const seat of seats) {
-        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -42 : 42;
+        const dx = seat.side === 'solo' ? 0 : seat.side === 'left' ? -44 : 44;
         const rot = (desk.rotation * Math.PI) / 180;
         map.set(seat.id, {
           x: desk.position.x + Math.cos(rot) * dx,
@@ -248,6 +254,15 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     setUndoStack((s) => [...s, assignments]);
     setRedoStack((s) => s.slice(0, -1));
     updateAssignments(classroomId, next);
+    setPickedStudentId(null);
+  };
+
+  // ── מחיקת שולחן ─────────────────────────────────────────────
+  const deleteDesk = (deskId: string) => {
+    const seatIds = new Set(classroom.seats.filter((s) => s.deskId === deskId).map((s) => s.id));
+    updateWithHistory(assignments.filter((a) => !seatIds.has(a.seatId)));
+    removeDesk(deskId);
+    setSelectedDeskId(null);
     setPickedStudentId(null);
   };
 
@@ -640,12 +655,57 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     const h = 92;
     const halfW = w / 2;
     const halfH = h / 2;
+    const isLongPressed = longPressDeskId === desk.id;
+    const isSelected = selectedDeskId === desk.id;
     return (
       <Group
         key={desk.id}
         id={`desk-${desk.id}`}
         x={desk.position.x} y={desk.position.y} rotation={desk.rotation}
-        draggable
+        opacity={isLongPressed ? 0.8 : 1}
+        scaleX={isLongPressed ? 1.04 : 1}
+        scaleY={isLongPressed ? 1.04 : 1}
+        onMouseDown={(e) => {
+          if (e.target.name() !== 'desk-bg') return;
+          dragStartPosRef.current = { x: e.currentTarget.x(), y: e.currentTarget.y() };
+          const node = e.currentTarget;
+          node.draggable(true);
+          node.startDrag(e.evt);
+        }}
+        onTouchStart={(e) => {
+          if (e.target.name() !== 'desk-bg') return;
+          const node = e.currentTarget;
+          const touch = e.evt.touches[0];
+          touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+          longPressTimerRef.current = setTimeout(() => {
+            node.draggable(true);
+            node.startDrag();
+            setLongPressDeskId(desk.id);
+            touchStartRef.current = null;
+          }, 450);
+        }}
+        onTouchMove={(e) => {
+          if (!touchStartRef.current || !longPressTimerRef.current) return;
+          const touch = e.evt.touches[0];
+          const ddx = Math.abs(touch.clientX - touchStartRef.current.x);
+          const ddy = Math.abs(touch.clientY - touchStartRef.current.y);
+          if (ddx > 8 || ddy > 8) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+            touchStartRef.current = null;
+          }
+        }}
+        onTouchEnd={() => {
+          const wasPending = longPressTimerRef.current !== null;
+          if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+          if (wasPending && touchStartRef.current) {
+            setSelectedDeskId(selectedDeskId === desk.id ? null : desk.id);
+          }
+          touchStartRef.current = null;
+        }}
         onDragMove={(e) => {
           let cx = e.target.x();
           let cy = e.target.y();
@@ -661,16 +721,43 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
         }}
         onDragEnd={(e) => {
           setSnapGuides({ vLines: [], hLines: [] });
+          setLongPressDeskId(null);
+          e.target.draggable(false);
           const newX = Math.max(halfW, Math.min(classroom.width - halfW, e.target.x()));
           const newY = Math.max(halfH, Math.min(classroom.height - halfH, e.target.y()));
+          const startX = dragStartPosRef.current?.x ?? desk.position.x;
+          const startY = dragStartPosRef.current?.y ?? desk.position.y;
+          const wasDrag = Math.abs(newX - startX) > 5 || Math.abs(newY - startY) > 5;
+          dragStartPosRef.current = null;
+          if (!wasDrag) {
+            e.target.x(desk.position.x);
+            e.target.y(desk.position.y);
+            setSelectedDeskId(selectedDeskId === desk.id ? null : desk.id);
+            return;
+          }
           e.target.x(newX);
           e.target.y(newY);
           updateDesk(desk.id, { position: { x: Math.round(newX), y: Math.round(newY) } });
         }}
       >
         <Rect x={-w / 2} y={-h / 2} width={w} height={h}
-              fill="#e7e5e4" stroke="#78716c" strokeWidth={1.5} cornerRadius={6}
+              name="desk-bg"
+              fill={isSelected ? '#eff6ff' : '#e7e5e4'}
+              stroke={isSelected ? '#0284c7' : '#78716c'}
+              strokeWidth={isSelected ? 2.5 : 1.5}
+              cornerRadius={6}
               listening={true} />
+        {isSelected && (
+          <Group
+            x={w / 2 - 11} y={-h / 2 - 11}
+            onClick={(e) => { e.cancelBubble = true; deleteDesk(desk.id); }}
+            onTap={(e) => { e.cancelBubble = true; deleteDesk(desk.id); }}
+          >
+            <Circle radius={10} fill="#dc2626" stroke="#fff" strokeWidth={1.5} />
+            <Text x={-10} y={-8} width={20} align="center"
+                  text="✕" fontSize={11} fontFamily="Heebo" fill="#fff" fontStyle="bold" listening={false} />
+          </Group>
+        )}
         {seats.map((seat) => renderSeat(seat))}
       </Group>
     );
@@ -678,8 +765,9 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
 
   const renderSeat = (seat: Seat) => {
     const isSolo = seat.side === 'solo';
-    const r = isSolo ? 44 : 43;
-    const dx = isSolo ? 0 : (seat.side === 'left' ? -42 : 42);
+    const seatW = isSolo ? 104 : 88;
+    const seatH = 92;
+    const dx = isSolo ? 0 : (seat.side === 'left' ? -44 : 44);
 
     const studentId = seatToStudentId.get(seat.id);
     const stu = studentId ? students.find((s) => s.id === studentId) : null;
@@ -689,7 +777,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     const isPinned = studentId ? pinnedSet.has(studentId) : false;
     const quality = (!stu && activeSeatQualityStudentId) ? seatQualities.get(seat.id) : undefined;
 
-    // צבעי עיגול
+    // צבעי ריבוע
     let bgColor: string;
     let strokeColor: string;
     let strokeW: number;
@@ -705,14 +793,21 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
     } else if (quality === 'bad') {
       bgColor = '#fee2e2'; strokeColor = '#dc2626'; strokeW = 2;
     } else {
-      bgColor = '#fff'; strokeColor = '#a8a29e'; strokeW = 2;
+      bgColor = '#f5f4f3'; strokeColor = '#e7e5e4'; strokeW = 0;
     }
 
+    // עיגול פינות — רק בפינות חיצוניות של השולחן
+    const cornerRadius: number | number[] = isSolo ? 4
+      : seat.side === 'left' ? [4, 0, 0, 4]
+      : [0, 4, 4, 0];
+
     const seatLines = stu ? getSeatLines(stu) : [];
-    const fontSize = stu ? calcLineFontSize(seatLines, r) : 10;
-    const textW = Math.round(r * 1.85);
-    const pinOff = Math.round(r * 0.68);
+    const fontSize = stu ? calcRectFontSize(seatLines, seatW, seatH) : 10;
+    const textW = seatW - 10;
     const pinR = 9;
+    // פין בפינה עליונה-ימנית של כל ריבוע
+    const pinX = dx + seatW / 2 - pinR - 2;
+    const pinY = -seatH / 2 + pinR + 2;
     const textColor = stu
       ? (stu.gender === 'm' ? '#1d4ed8' : stu.gender === 'f' ? '#be185d' : '#1c1917')
       : '#a8a29e';
@@ -721,11 +816,10 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
 
     return (
       <Group key={seat.id}>
-        <Circle
-          x={dx} y={0} radius={r}
-          fill={bgColor} stroke={strokeColor} strokeWidth={strokeW}
+        {/* קבוצה גרירה שמרכזה במרכז המושב (dx, 0) */}
+        <Group
+          x={dx} y={0}
           draggable={canDrag}
-          listening={true}
           onMouseEnter={() => { if (stu) setHoveredStudentId(stu.id); }}
           onMouseLeave={() => setHoveredStudentId(null)}
           onClick={(e) => { e.cancelBubble = true; onSeatClick(seat.id); }}
@@ -735,35 +829,40 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
           onDragStart={(e) => { e.cancelBubble = true; if (stu) setDraggedStudentId(stu.id); }}
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           onDragEnd={(e: any) => onKonvaDragEnd(e, seat.id, dx)}
-        />
-        {stu && (() => {
-          const lineH = fontSize + 2;
-          // גובה ויזואלי אמיתי: שורות ביניים + גובה שורה אחרונה
-          const visualH = (seatLines.length - 1) * lineH + fontSize;
-          return seatLines.map((line, i) => (
+        >
+          <Rect
+            x={-seatW / 2} y={-seatH / 2} width={seatW} height={seatH}
+            fill={bgColor} stroke={strokeColor} strokeWidth={strokeW}
+            cornerRadius={cornerRadius}
+          />
+          {stu && (() => {
+            const lineH = fontSize + 2;
+            const visualH = (seatLines.length - 1) * lineH + fontSize;
+            return seatLines.map((line, i) => (
+              <Text
+                key={i}
+                x={-textW / 2}
+                y={-visualH / 2 + i * lineH}
+                width={textW} align="center"
+                text={line} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+                listening={false}
+              />
+            ));
+          })()}
+          {!stu && !activeSeatQualityStudentId && (
             <Text
-              key={i}
-              x={dx - textW / 2}
-              y={-visualH / 2 + i * lineH}
-              width={textW} align="center"
-              text={line} fontSize={fontSize} fontFamily="Heebo" fill={textColor} fontStyle="bold"
+              x={-8} y={-9}
+              width={16} align="center"
+              text="+" fontSize={16} fontFamily="Heebo" fill="#c4bdb9"
               listening={false}
             />
-          ));
-        })()}
-        {!stu && !activeSeatQualityStudentId && (
-          <Text
-            x={dx - 8} y={-9}
-            width={16} align="center"
-            text="+" fontSize={16} fontFamily="Heebo" fill="#c4bdb9"
-            listening={false}
-          />
-        )}
+          )}
+        </Group>
         {stu && (
           <>
             <Circle
               name="pin"
-              x={dx + pinOff} y={-pinOff} radius={pinR}
+              x={pinX} y={pinY} radius={pinR}
               fill={isPinned ? '#7c3aed' : '#e2e8f0'}
               stroke={isPinned ? '#5b21b6' : '#94a3b8'} strokeWidth={1}
               listening={true}
@@ -772,7 +871,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
             />
             <Text
               name="pin"
-              x={dx + pinOff - pinR} y={-pinOff - pinR + 1}
+              x={pinX - pinR} y={pinY - pinR + 1}
               width={pinR * 2} align="center"
               text="📌" fontSize={isPinned ? 9 : 8} listening={false}
             />
@@ -1012,6 +1111,20 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
             >
               ＋ שולחן זוג
             </button>
+            {selectedDeskId && (
+              <button
+                onClick={() => deleteDesk(selectedDeskId)}
+                style={{
+                  background: '#dc2626', color: '#fff',
+                  border: 'none', borderRadius: 'var(--rs)',
+                  padding: '8px 14px', fontWeight: 800, fontSize: 13,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}
+              >
+                🗑 מחק שולחן
+              </button>
+            )}
             <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
                 <strong>{displayAssignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
@@ -1043,6 +1156,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
                 ref={stageRef}
                 width={classroom.width} height={classroom.height}
                 style={{ background: '#fff', cursor: (pickedStudentId || draggedStudentId) ? 'crosshair' : 'default' }}
+                onClick={(e) => { if (e.target === e.target.getStage()) setSelectedDeskId(null); }}
               >
                 <Layer>
                   {classroom.walls.map(renderWall)}
@@ -1571,14 +1685,15 @@ function getSeatLines(stu: Student): string[] {
   return [first, family];
 }
 
-// גודל פונט מקסימלי שמתאים לרדיוס ואורך השורות
-function calcLineFontSize(lines: string[], r: number): number {
-  const availW = r * 1.72;
+// גודל פונט מקסימלי שמתאים לממדי הריבוע
+function calcRectFontSize(lines: string[], seatW: number, seatH: number): number {
+  const availW = seatW - 10;
   const maxLen = Math.max(...lines.map((l) => l.length), 1);
-  const byWidth  = Math.floor(availW / (maxLen * 0.55));
-  // שתי שורות + גאפ צריכות להיכנס לקוטר האנכי (r * 2 * 0.75)
-  const byHeight = lines.length > 1 ? Math.floor((r * 1.5 - 2) / 2) : Math.floor(r * 0.72);
-  return Math.max(9, Math.min(byWidth, byHeight, 23));
+  const byWidth = Math.floor(availW / (maxLen * 0.55));
+  const byHeight = lines.length > 1
+    ? Math.floor((seatH * 0.68 - 2) / 2)
+    : Math.floor(seatH * 0.40);
+  return Math.max(9, Math.min(byWidth, byHeight, 22));
 }
 
 function HistoryItem({ name, date, onRestore, cloud }: {
