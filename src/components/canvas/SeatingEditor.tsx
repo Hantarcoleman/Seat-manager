@@ -51,8 +51,8 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
   const [genderMode, setGenderMode] = useState<'mix' | 'same' | null>(null);
-  const [aiProposals, setAiProposals] = useState<SeatingArrangement[]>([]);
-  const [previewIdx, setPreviewIdx] = useState<number | null>(null);
+  const [undoStack, setUndoStack] = useState<import('../../types').SeatAssignment[][]>([]);
+  const [redoStack, setRedoStack] = useState<import('../../types').SeatAssignment[][]>([]);
   const [search, setSearch] = useState('');
   const [generating, setGenerating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
@@ -96,13 +96,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   // השיבוצים הנוכחיים מהחנות (תמיד)
   const assignments = working?.assignments ?? [];
 
-  // שיבוצים לתצוגה — בתצוגה מקדימה מציגים ההצעה, אחרת את הנוכחיים
-  const displayAssignments = useMemo(() => {
-    if (previewIdx !== null && aiProposals[previewIdx]) {
-      return aiProposals[previewIdx].assignments;
-    }
-    return assignments;
-  }, [previewIdx, aiProposals, assignments]);
+  const displayAssignments = assignments;
 
   const seatToStudentId = useMemo(() => {
     const m = new Map<string, string>();
@@ -132,20 +126,12 @@ export default function SeatingEditor({ classroomId }: Props) {
   );
   const availableSeats = classroom ? classroom.seats.length - displayAssignments.length : 0;
 
-  // אזהרות וציון — בתצוגה מקדימה משתמשים בנתוני ההצעה
   const displayWarnings = useMemo((): ArrangementWarning[] => {
-    if (!classroom) return [];
-    if (previewIdx !== null && aiProposals[previewIdx]) {
-      return aiProposals[previewIdx].warnings;
-    }
-    if (!working) return [];
+    if (!classroom || !working) return [];
     return validateAssignments(working, classroom, students, { separateGenders: genderMode === 'same', mixGenders: genderMode === 'mix', forbiddenGroups });
-  }, [previewIdx, aiProposals, working, classroom, students, separateGenders, forbiddenGroups]);
+  }, [working, classroom, students, genderMode, forbiddenGroups]);
 
-  const displayScore = useMemo(() => {
-    if (previewIdx !== null && aiProposals[previewIdx]) return aiProposals[previewIdx].score;
-    return scoreArrangement(displayWarnings);
-  }, [previewIdx, aiProposals, displayWarnings]);
+  const displayScore = useMemo(() => scoreArrangement(displayWarnings), [displayWarnings]);
 
   const boyCount = useMemo(() => students.filter((s) => s.gender === 'm').length, [students]);
   const girlCount = useMemo(() => students.filter((s) => s.gender === 'f').length, [students]);
@@ -175,7 +161,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   }, [classroom]);
 
   // התלמיד הפעיל לצורך הדגשת מושבים (נגרר / נבחר)
-  const activeSeatQualityStudentId = previewIdx !== null ? null : (draggedStudentId ?? pickedStudentId);
+  const activeSeatQualityStudentId = draggedStudentId ?? pickedStudentId;
 
   // איכות כל מושב עבור התלמיד הפעיל
   const seatQualities = useMemo(() => {
@@ -236,21 +222,43 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   if (!classroom) return null;
 
-  // ── פעולות שיבוץ ──────────────────────────────────────────
-  const assignToSeat = (seatId: string, studentId: string) => {
-    if (previewIdx !== null) return;
-    const next = assignments.filter((a) => a.seatId !== seatId && a.studentId !== studentId);
-    next.push({ seatId, studentId });
+  // ── היסטוריה (undo/redo) ──────────────────────────────────
+  const updateWithHistory = (next: import('../../types').SeatAssignment[]) => {
+    setUndoStack((s) => [...s.slice(-49), assignments]);
+    setRedoStack([]);
     updateAssignments(classroomId, next);
   };
 
+  const undo = () => {
+    if (undoStack.length === 0) return;
+    const prev = undoStack[undoStack.length - 1];
+    setRedoStack((s) => [...s, assignments]);
+    setUndoStack((s) => s.slice(0, -1));
+    updateAssignments(classroomId, prev);
+    setPickedStudentId(null);
+  };
+
+  const redo = () => {
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    setUndoStack((s) => [...s, assignments]);
+    setRedoStack((s) => s.slice(0, -1));
+    updateAssignments(classroomId, next);
+    setPickedStudentId(null);
+  };
+
+  // ── פעולות שיבוץ ──────────────────────────────────────────
+  const assignToSeat = (seatId: string, studentId: string) => {
+    const next = assignments.filter((a) => a.seatId !== seatId && a.studentId !== studentId);
+    next.push({ seatId, studentId });
+    updateWithHistory(next);
+  };
+
   const removeFromSeat = (seatId: string) => {
-    if (previewIdx !== null) return;
-    updateAssignments(classroomId, assignments.filter((a) => a.seatId !== seatId));
+    updateWithHistory(assignments.filter((a) => a.seatId !== seatId));
   };
 
   const onSeatClick = (seatId: string) => {
-    if (previewIdx !== null) return;
     const occupant = seatToStudentId.get(seatId);
     if (pickedStudentId) {
       if (pinnedSet.has(pickedStudentId)) { setPickedStudentId(null); return; }
@@ -258,12 +266,11 @@ export default function SeatingEditor({ classroomId }: Props) {
       if (occupant && occupant !== pickedStudentId) {
         if (pinnedSet.has(occupant)) { setPickedStudentId(null); return; }
         if (pickedSeat) {
-          const next = assignments.map((a) => {
+          updateWithHistory(assignments.map((a) => {
             if (a.studentId === pickedStudentId) return { seatId, studentId: pickedStudentId };
             if (a.seatId === seatId) return { seatId: pickedSeat, studentId: occupant };
             return a;
-          });
-          updateAssignments(classroomId, next);
+          }));
         } else {
           assignToSeat(seatId, pickedStudentId);
         }
@@ -274,14 +281,12 @@ export default function SeatingEditor({ classroomId }: Props) {
     } else if (occupant && !pinnedSet.has(occupant)) {
       setPickedStudentId(occupant);
     } else if (!occupant) {
-      // כיסא ריק — פתח חיפוש מהיר
       const pos = seatAbsolutePositions.get(seatId);
       if (pos) { setQuickAssign({ seatId, x: pos.x, y: pos.y }); setQuickSearch(''); }
     }
   };
 
   const onSeatDblClick = (seatId: string) => {
-    if (previewIdx !== null) return;
     const occupant = seatToStudentId.get(seatId);
     if (occupant && !pinnedSet.has(occupant)) {
       removeFromSeat(seatId);
@@ -290,12 +295,10 @@ export default function SeatingEditor({ classroomId }: Props) {
   };
 
   const onParkingStudentClick = (studentId: string) => {
-    if (previewIdx !== null) return;
     setPickedStudentId(pickedStudentId === studentId ? null : studentId);
   };
 
   const onParkingDrop = () => {
-    if (previewIdx !== null) return;
     if (pickedStudentId && studentToSeatId.has(pickedStudentId)) {
       removeFromSeat(studentToSeatId.get(pickedStudentId)!);
       setPickedStudentId(null);
@@ -305,8 +308,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const clearAllAssignments = () => {
     if (assignments.length === 0) return;
     if (!confirm(`לנקות את כל ${assignments.length} השיבוצים?`)) return;
-    setAiProposals([]); setPreviewIdx(null);
-    updateAssignments(classroomId, []);
+    updateWithHistory([]);
     clearPins(classroomId);
     setPickedStudentId(null);
   };
@@ -316,8 +318,7 @@ export default function SeatingEditor({ classroomId }: Props) {
     const toClear = assignments.length - toKeep.length;
     if (toClear === 0) return;
     if (!confirm(`למחוק ${toClear} שיבוצים? הנעוצים (${toKeep.length}) יישארו.`)) return;
-    setAiProposals([]); setPreviewIdx(null);
-    updateAssignments(classroomId, toKeep);
+    updateWithHistory(toKeep);
     setPickedStudentId(null);
   };
 
@@ -348,14 +349,13 @@ export default function SeatingEditor({ classroomId }: Props) {
     const targetOccupant = seatToStudentId.get(targetSeatId);
     if (targetOccupant) {
       if (pinnedSet.has(targetOccupant)) return;
-      const next = assignments.map((a) => {
+      updateWithHistory(assignments.map((a) => {
         if (a.seatId === seatId) return { seatId: targetSeatId!, studentId: draggedId };
         if (a.seatId === targetSeatId) return { seatId, studentId: targetOccupant };
         return a;
-      });
-      updateAssignments(classroomId, next);
+      }));
     } else {
-      updateAssignments(classroomId, assignments.map((a) =>
+      updateWithHistory(assignments.map((a) =>
         a.seatId === seatId ? { seatId: targetSeatId!, studentId: draggedId } : a
       ));
     }
@@ -385,7 +385,7 @@ export default function SeatingEditor({ classroomId }: Props) {
     if (targetSeatId && minDist < 60) assignToSeat(targetSeatId, studentId);
   };
 
-  // ── יצירת 3 הצעות AI ─────────────────────────────────────────
+  // ── יצירת סידור AI — מיישם את הטוב מ-3 ניסיונות ────────────
   const generateWithAI = () => {
     if (students.length === 0 || classroom.seats.length === 0) return;
     setGenerating(true);
@@ -398,7 +398,7 @@ export default function SeatingEditor({ classroomId }: Props) {
         const freeClassroom = { ...classroom, seats: classroom.seats.filter((s) => !pinnedSeatIds.has(s.id)) };
         const baseSeed = Date.now();
 
-        const proposals = [0, 12345, 67890].map((offset) => {
+        const candidates = [0, 12345, 67890].map((offset) => {
           const raw = generateSeatingArrangement(freeClassroom, freeStudents, {
             candidates: 60, seed: baseSeed + offset,
             separateGenders: genderMode === 'same', mixGenders: genderMode === 'mix', forbiddenGroups,
@@ -408,25 +408,14 @@ export default function SeatingEditor({ classroomId }: Props) {
           return { ...merged, warnings, score: scoreArrangement(warnings) };
         });
 
-        setAiProposals(proposals);
-        setPreviewIdx(0);
+        const best = candidates.reduce((a, b) => b.score > a.score ? b : a);
+        updateWithHistory(best.assignments);
         setPickedStudentId(null);
       } finally {
         setGenerating(false);
       }
     }, 30);
   };
-
-  const applyProposal = (idx: number) => {
-    const proposal = aiProposals[idx];
-    if (!proposal) return;
-    updateAssignments(classroomId, proposal.assignments);
-    setAiProposals([]);
-    setPreviewIdx(null);
-    setPickedStudentId(null);
-  };
-
-  const cancelProposals = () => { setAiProposals([]); setPreviewIdx(null); };
 
   const exportPdf = () => {
     if (!stageRef.current || !classroom) return;
@@ -450,6 +439,7 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const restoreFromHistory = (arr: SeatingArrangement) => {
     updateAssignments(classroomId, arr.assignments);
+    setUndoStack([]); setRedoStack([]);
     setPickedStudentId(null);
     setShowHistory(false);
   };
@@ -536,7 +526,7 @@ export default function SeatingEditor({ classroomId }: Props) {
       ? (stu.gender === 'm' ? '#1d4ed8' : stu.gender === 'f' ? '#be185d' : '#1c1917')
       : '#a8a29e';
 
-    const canDrag = !!stu && !isPinned && previewIdx === null;
+    const canDrag = !!stu && !isPinned;
 
     return (
       <Group key={seat.id}>
@@ -631,30 +621,6 @@ export default function SeatingEditor({ classroomId }: Props) {
           <span style={{ fontSize: 13, color: '#be185d', fontWeight: 700 }}>👧 {girlCount}</span>
         </div>
       </div>
-
-      {/* באנר תצוגה מקדימה */}
-      {previewIdx !== null && (
-        <div style={{
-          background: '#fff7ed', border: '2px solid var(--ac)', borderRadius: 'var(--rs)',
-          padding: '8px 14px', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 12,
-        }}>
-          <span style={{ fontSize: 13, fontWeight: 700 }}>
-            👁 תצוגה מקדימה — הצעה {previewIdx + 1} (לא שמורה)
-          </span>
-          <button
-            onClick={() => applyProposal(previewIdx!)}
-            style={{ background: 'var(--ac)', color: '#fff', border: 'none', borderRadius: 'var(--rs)', padding: '6px 14px', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: 'inherit' }}
-          >
-            ✓ החל
-          </button>
-          <button
-            onClick={cancelProposals}
-            style={{ background: 'none', border: '1px solid var(--bd)', borderRadius: 'var(--rs)', padding: '6px 12px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit' }}
-          >
-            ✕ בטל
-          </button>
-        </div>
-      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, alignItems: 'start' }}>
         {/* ── עמודה שמאלית: קנבס ── */}
@@ -753,6 +719,35 @@ export default function SeatingEditor({ classroomId }: Props) {
             >
               👥 אותו מין יחד
             </button>
+            {/* undo / redo */}
+            <button
+              onClick={undo}
+              disabled={undoStack.length === 0}
+              style={{
+                background: 'var(--bg2)', color: undoStack.length > 0 ? 'var(--ink)' : 'var(--ink3)',
+                border: '1.5px solid var(--bd)', borderRadius: 'var(--rs)',
+                padding: '8px 12px', fontWeight: 700, fontSize: 13,
+                cursor: undoStack.length > 0 ? 'pointer' : 'not-allowed',
+                opacity: undoStack.length > 0 ? 1 : 0.4, fontFamily: 'inherit',
+              }}
+              title={`בטל (${undoStack.length} שלבים)`}
+            >
+              ↩ בטל
+            </button>
+            <button
+              onClick={redo}
+              disabled={redoStack.length === 0}
+              style={{
+                background: 'var(--bg2)', color: redoStack.length > 0 ? 'var(--ink)' : 'var(--ink3)',
+                border: '1.5px solid var(--bd)', borderRadius: 'var(--rs)',
+                padding: '8px 12px', fontWeight: 700, fontSize: 13,
+                cursor: redoStack.length > 0 ? 'pointer' : 'not-allowed',
+                opacity: redoStack.length > 0 ? 1 : 0.4, fontFamily: 'inherit',
+              }}
+              title={`הבא (${redoStack.length} שלבים)`}
+            >
+              ↪ הבא
+            </button>
             <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
                 <strong>{displayAssignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
@@ -767,11 +762,9 @@ export default function SeatingEditor({ classroomId }: Props) {
           </div>
 
           <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>
-            {previewIdx !== null
-              ? '👁 תצוגה מקדימה בלבד — לחץ "החל" ליישום או "בטל" לחזרה'
-              : pickedStudentId
-                ? '👆 לחץ על מושב לשיבוץ · גרור ישירות · לחץ "אזור המתנה" להחזיר'
-                : '💡 לחץ/גרור תלמיד מרשימת ההמתנה · לחץ על מושב תפוס להזזה · דאבל-קליק להסרה'}
+            {pickedStudentId
+              ? '👆 לחץ על מושב לשיבוץ · גרור ישירות · לחץ "אזור המתנה" להחזיר'
+              : '💡 לחץ/גרור תלמיד מרשימת ההמתנה · לחץ על מושב תפוס להזזה · דאבל-קליק להסרה · ↩ בטל לביטול מהלך'}
           </div>
 
           <DeskGridControls classroomId={classroomId}>
@@ -985,56 +978,6 @@ export default function SeatingEditor({ classroomId }: Props) {
                   })}
                 </div>
               </div>
-
-              {/* הצעות AI */}
-              {aiProposals.length > 0 && (
-                <div style={{
-                  background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
-                  padding: 12, boxShadow: 'var(--sh)',
-                }}>
-                  <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>🤖 הצעות AI — בחר אחת</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {aiProposals.map((p, i) => {
-                      const hard = p.warnings.filter((w) => w.type === 'hard').length;
-                      const soft = p.warnings.filter((w) => w.type === 'soft').length;
-                      const isActive = previewIdx === i;
-                      return (
-                        <div
-                          key={i}
-                          onClick={() => setPreviewIdx(i)}
-                          style={{
-                            background: isActive ? '#fff7ed' : 'var(--bg)',
-                            border: `1.5px solid ${isActive ? 'var(--ac)' : 'var(--bd)'}`,
-                            borderRadius: 'var(--rs)', padding: '8px 10px', cursor: 'pointer',
-                            display: 'flex', alignItems: 'center', gap: 8,
-                          }}
-                        >
-                          <span style={{ fontWeight: 800, fontSize: 13 }}>הצעה {i + 1}</span>
-                          <span style={{
-                            background: p.score >= 80 ? '#16a34a' : p.score >= 60 ? '#ca8a04' : '#dc2626',
-                            color: '#fff', fontSize: 12, fontWeight: 800, padding: '2px 8px', borderRadius: 10,
-                          }}>{p.score}</span>
-                          <span style={{ fontSize: 11, color: 'var(--ink3)', flex: 1 }}>
-                            {hard} חמורות · {soft} מומלצות
-                          </span>
-                          {isActive && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); applyProposal(i); }}
-                              style={{
-                                background: 'var(--ac)', color: '#fff', border: 'none',
-                                borderRadius: 'var(--rs)', padding: '4px 10px', fontSize: 11, fontWeight: 700,
-                                cursor: 'pointer', fontFamily: 'inherit',
-                              }}
-                            >
-                              החל
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
 
               {/* הסבר שיבוץ */}
               {placementExplanation && (
