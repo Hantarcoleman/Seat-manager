@@ -2,10 +2,24 @@ import { useState, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import type { SharedClassroomData } from '../types';
 
-// מפענח Unicode-safe — btoa לבדו נכשל על עברית
+// מקודד UTF-8 → bytes → base64 — קומפקטי ותומך בעברית
+function utf8ToB64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin);
+}
+
+function b64ToUtf8(raw: string): string {
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 function decodeShareData(raw: string): SharedClassroomData | null {
   try {
-    return JSON.parse(decodeURIComponent(atob(raw))) as SharedClassroomData;
+    return JSON.parse(b64ToUtf8(raw)) as SharedClassroomData;
   } catch {
     return null;
   }
@@ -20,7 +34,7 @@ function encodeRequestUrl(
 ): string {
   const payload = JSON.stringify({ classroomId, requesterName, preferredNear, message });
   const base = window.location.href.split('#')[0];
-  return `${base}#/classroom/${classroomId}/requests?req=${btoa(encodeURIComponent(payload))}`;
+  return `${base}#/classroom/${classroomId}/requests?req=${utf8ToB64(payload)}`;
 }
 
 export default function StudentRequestPage() {

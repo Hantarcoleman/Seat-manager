@@ -6,9 +6,23 @@ import { useRequestsStore } from '../store/requestsStore';
 import ClassroomNav from '../components/canvas/ClassroomNav';
 import type { SeatRequest, SeatRequestStatus, SharedClassroomData } from '../types';
 
-// מקודד Unicode-safe — btoa לבדו נכשל על עברית
+// מקודד UTF-8 → bytes → base64 — קומפקטי ותומך בעברית
+function utf8ToB64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  bytes.forEach((b) => (bin += String.fromCharCode(b)));
+  return btoa(bin);
+}
+
+function b64ToUtf8(raw: string): string {
+  const bin = atob(raw);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 function encodeShareData(data: SharedClassroomData): string {
-  return btoa(encodeURIComponent(JSON.stringify(data)));
+  return utf8ToB64(JSON.stringify(data));
 }
 
 // מפענח בקשה שהגיעה ב-URL מתלמיד
@@ -19,7 +33,7 @@ function decodeIncomingRequest(raw: string): {
   message: string;
 } | null {
   try {
-    return JSON.parse(decodeURIComponent(atob(raw)));
+    return JSON.parse(b64ToUtf8(raw));
   } catch {
     return null;
   }
