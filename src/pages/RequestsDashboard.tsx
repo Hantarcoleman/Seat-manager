@@ -1,12 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useClassroomStore } from '../store/classroomStore';
 import { useStudentsStore } from '../store/studentsStore';
 import { useRequestsStore } from '../store/requestsStore';
+import {
+  fetchRequests, respondToRequest, deleteRequest, subscribeToRequests,
+} from '../services/requestsService';
+import { isSupabaseEnabled } from '../services/supabaseClient';
 import ClassroomNav from '../components/canvas/ClassroomNav';
 import type { SeatRequest, SeatRequestStatus, SharedClassroomData } from '../types';
 
-// מקודד UTF-8 → bytes → base64 — קומפקטי ותומך בעברית
 function utf8ToB64(str: string): string {
   const bytes = new TextEncoder().encode(str);
   let bin = '';
@@ -25,19 +28,13 @@ function encodeShareData(data: SharedClassroomData): string {
   return utf8ToB64(JSON.stringify(data));
 }
 
-// מפענח בקשה שהגיעה ב-URL מתלמיד
 function decodeIncomingRequest(raw: string): {
-  classroomId: string;
-  requesterName: string;
-  preferredNear: string;
-  message: string;
+  classroomId: string; requesterName: string; preferredNear: string; message: string;
 } | null {
-  try {
-    return JSON.parse(b64ToUtf8(raw));
-  } catch {
-    return null;
-  }
+  try { return JSON.parse(b64ToUtf8(raw)); } catch { return null; }
 }
+
+// ── רכיבים קטנים ────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: SeatRequestStatus }) {
   const map: Record<SeatRequestStatus, { label: string; bg: string; color: string }> = {
@@ -50,9 +47,7 @@ function StatusBadge({ status }: { status: SeatRequestStatus }) {
     <span style={{
       display: 'inline-block', padding: '2px 10px', borderRadius: 20,
       fontSize: 12, fontWeight: 700, background: s.bg, color: s.color,
-    }}>
-      {s.label}
-    </span>
+    }}>{s.label}</span>
   );
 }
 
@@ -63,14 +58,15 @@ interface RespondModalProps {
 }
 
 function RespondModal({ req, onClose, onRespond }: RespondModalProps) {
-  const [status, setStatus] = useState<SeatRequestStatus>(req.status === 'pending' ? 'approved' : req.status);
+  const [status, setStatus] = useState<SeatRequestStatus>(
+    req.status === 'pending' ? 'approved' : req.status
+  );
   const [response, setResponse] = useState(req.response ?? '');
 
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-      padding: 16,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16,
     }}>
       <div style={{
         background: 'var(--bg2)', borderRadius: 'var(--r)', padding: 28,
@@ -83,24 +79,14 @@ function RespondModal({ req, onClose, onRespond }: RespondModalProps) {
 
         <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
           {(['approved', 'denied'] as SeatRequestStatus[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => setStatus(s)}
-              style={{
-                flex: 1,
-                padding: '10px 0',
-                border: status === s ? '2px solid var(--ac)' : '1px solid var(--bd)',
-                borderRadius: 'var(--rs)',
-                background: status === s
-                  ? (s === 'approved' ? '#d1e7dd' : '#f8d7da')
-                  : 'var(--bg)',
-                color: status === s
-                  ? (s === 'approved' ? '#0a5c36' : '#842029')
-                  : 'var(--ink2)',
-                fontWeight: 700, fontSize: 15,
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
+            <button key={s} onClick={() => setStatus(s)} style={{
+              flex: 1, padding: '10px 0',
+              border: status === s ? '2px solid var(--ac)' : '1px solid var(--bd)',
+              borderRadius: 'var(--rs)',
+              background: status === s ? (s === 'approved' ? '#d1e7dd' : '#f8d7da') : 'var(--bg)',
+              color: status === s ? (s === 'approved' ? '#0a5c36' : '#842029') : 'var(--ink2)',
+              fontWeight: 700, fontSize: 15, cursor: 'pointer', fontFamily: 'inherit',
+            }}>
               {s === 'approved' ? '✅ אישור' : '❌ דחייה'}
             </button>
           ))}
@@ -152,16 +138,10 @@ function ShareModal({ data, onClose }: { data: SharedClassroomData; onClose: () 
     setTimeout(() => setCopied(false), 2500);
   };
 
-  const handleWhatsApp = () => {
-    const text = encodeURIComponent(`📝 בקשת מעבר מקום ישיבה — ${data.name}\n${url}`);
-    window.open(`https://wa.me/?text=${text}`, '_blank');
-  };
-
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
-      padding: 16,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16,
     }}>
       <div style={{
         background: 'var(--bg2)', borderRadius: 'var(--r)', padding: 28,
@@ -169,13 +149,12 @@ function ShareModal({ data, onClose }: { data: SharedClassroomData; onClose: () 
       }}>
         <h3 style={{ margin: '0 0 6px', fontSize: 17 }}>📤 שתף קישור לתלמידים</h3>
         <p style={{ margin: '0 0 18px', color: 'var(--ink2)', fontSize: 13, lineHeight: 1.5 }}>
-          שלח/י לתלמידים את הקישור הזה. הם יוכלו להגיש בקשת מעבר מקום ישיבה, ובסיום ישלחו לך קישור חזרה.
+          שלח/י את הקישור לתלמידים. הם יגישו בקשה והיא תגיע ישירות לרשימה שלך.
         </p>
 
         <div style={{
-          background: 'var(--bg)', border: '1px solid var(--bd)',
-          borderRadius: 'var(--rs)', padding: '10px 14px',
-          fontSize: 12, color: 'var(--ink2)', wordBreak: 'break-all',
+          background: 'var(--bg)', border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
+          padding: '10px 14px', fontSize: 12, color: 'var(--ink2)', wordBreak: 'break-all',
           marginBottom: 16, direction: 'ltr', textAlign: 'left',
         }}>
           {url}
@@ -189,11 +168,14 @@ function ShareModal({ data, onClose }: { data: SharedClassroomData; onClose: () 
           }}>
             {copied ? '✔ הועתק!' : '📋 העתק קישור'}
           </button>
-          <button onClick={handleWhatsApp} style={{
-            background: '#25D366', color: '#fff', border: 'none',
-            borderRadius: 'var(--rs)', padding: '9px 18px',
-            fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
-          }}>
+          <button
+            onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(`📝 בקשת מעבר מקום ישיבה — ${data.name}\n${url}`)}`, '_blank')}
+            style={{
+              background: '#25D366', color: '#fff', border: 'none',
+              borderRadius: 'var(--rs)', padding: '9px 18px',
+              fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
             📲 שלח ב-WhatsApp
           </button>
         </div>
@@ -206,6 +188,8 @@ function ShareModal({ data, onClose }: { data: SharedClassroomData; onClose: () 
   );
 }
 
+// ── דף ראשי ──────────────────────────────────────────────────
+
 export default function RequestsDashboard() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -215,10 +199,19 @@ export default function RequestsDashboard() {
   const setCurrent = useClassroomStore((s) => s.setCurrent);
   const students = useStudentsStore((s) => (id ? (s.byClassroom[id] ?? []) : []));
 
-  const requests = useRequestsStore((s) => (id ? s.get(id) : []));
-  const addRequest = useRequestsStore((s) => s.add);
-  const respond = useRequestsStore((s) => s.respond);
-  const removeRequest = useRequestsStore((s) => s.remove);
+  // localStorage store — fallback כשאין Supabase
+  const localRequests = useRequestsStore((s) => (id ? s.get(id) : []));
+  const addLocal = useRequestsStore((s) => s.add);
+  const respondLocal = useRequestsStore((s) => s.respond);
+  const removeLocal = useRequestsStore((s) => s.remove);
+
+  const useSupabase = isSupabaseEnabled();
+
+  // בקשות מ-Supabase
+  const [sbRequests, setSbRequests] = useState<SeatRequest[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const requests = useSupabase ? sbRequests : localRequests;
 
   const [respondingTo, setRespondingTo] = useState<SeatRequest | null>(null);
   const [showShare, setShowShare] = useState(false);
@@ -227,14 +220,32 @@ export default function RequestsDashboard() {
 
   useEffect(() => { if (id) setCurrent(id); }, [id, setCurrent]);
 
-  // ייבוא אוטומטי של בקשה שהגיעה ב-URL
+  // טעינה ראשונית מ-Supabase
+  const loadFromSupabase = useCallback(async () => {
+    if (!id || !useSupabase) return;
+    setLoading(true);
+    const data = await fetchRequests(id);
+    setSbRequests(data);
+    setLoading(false);
+  }, [id, useSupabase]);
+
+  useEffect(() => { loadFromSupabase(); }, [loadFromSupabase]);
+
+  // real-time subscription — מתעדכן אוטומטית כשמגיעה בקשה חדשה
   useEffect(() => {
-    if (!id || !classroom) return;
+    if (!id || !useSupabase) return;
+    const unsubscribe = subscribeToRequests(id, loadFromSupabase);
+    return unsubscribe;
+  }, [id, useSupabase, loadFromSupabase]);
+
+  // ייבוא אוטומטי של בקשה שהגיעה ב-URL (fallback ללא Supabase)
+  useEffect(() => {
+    if (!id || !classroom || useSupabase) return;
     const raw = searchParams.get('req');
     if (!raw) return;
     const decoded = decodeIncomingRequest(raw);
     if (!decoded || decoded.classroomId !== id) return;
-    addRequest({
+    addLocal({
       classroomId: id,
       classroomName: classroom.name,
       requesterName: decoded.requesterName,
@@ -243,7 +254,7 @@ export default function RequestsDashboard() {
     });
     setImportedName(decoded.requesterName);
     setSearchParams({}, { replace: true });
-  }, [id, classroom, searchParams, setSearchParams, addRequest]);
+  }, [id, classroom, searchParams, setSearchParams, addLocal, useSupabase]);
 
   if (!classroom) {
     return (
@@ -258,6 +269,25 @@ export default function RequestsDashboard() {
     );
   }
 
+  const handleRespond = async (req: SeatRequest, status: SeatRequestStatus, response: string) => {
+    if (useSupabase) {
+      await respondToRequest(req.id, status, response);
+      await loadFromSupabase();
+    } else {
+      respondLocal(req.classroomId, req.id, status, response);
+    }
+  };
+
+  const handleDelete = async (req: SeatRequest) => {
+    if (!confirm('למחוק את הבקשה?')) return;
+    if (useSupabase) {
+      await deleteRequest(req.id);
+      await loadFromSupabase();
+    } else {
+      removeLocal(req.classroomId, req.id);
+    }
+  };
+
   const shareData: SharedClassroomData = {
     classroomId: classroom.id,
     name: classroom.name,
@@ -267,10 +297,8 @@ export default function RequestsDashboard() {
   const filtered = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
   const pendingCount = requests.filter((r) => r.status === 'pending').length;
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  };
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('he-IL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 
   return (
     <div>
@@ -283,11 +311,11 @@ export default function RequestsDashboard() {
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           ✅ בקשה מ-{importedName} נוספה בהצלחה!
-          <button onClick={() => setImportedName(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18, lineHeight: 1 }}>×</button>
+          <button onClick={() => setImportedName(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>×</button>
         </div>
       )}
 
-      {/* כותרת ופעולות */}
+      {/* כותרת */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ margin: '0 0 4px', fontSize: 20 }}>
@@ -296,26 +324,28 @@ export default function RequestsDashboard() {
               <span style={{
                 marginRight: 8, background: 'var(--ac)', color: '#fff',
                 borderRadius: 20, padding: '2px 9px', fontSize: 13, fontWeight: 700,
-              }}>
-                {pendingCount} ממתינות
-              </span>
+              }}>{pendingCount} ממתינות</span>
             )}
           </h2>
           <p style={{ margin: 0, color: 'var(--ink2)', fontSize: 13 }}>
-            תלמידים יכולים לשלוח בקשות דרך הקישור המשותף
+            {useSupabase
+              ? 'בקשות מגיעות אוטומטית כשתלמידים שולחים דרך הקישור'
+              : 'שתף/י קישור עם התלמידים כדי לקבל בקשות'}
           </p>
         </div>
-        <button
-          onClick={() => setShowShare(true)}
-          style={{
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          {loading && <span style={{ fontSize: 13, color: 'var(--ink3)' }}>⏳ טוען...</span>}
+          {useSupabase && (
+            <button onClick={loadFromSupabase} style={ghostBtn} title="רענן">↻ רענן</button>
+          )}
+          <button onClick={() => setShowShare(true)} style={{
             background: 'var(--ac)', color: '#fff', border: 'none',
             borderRadius: 'var(--rs)', padding: '10px 18px',
             fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit',
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}
-        >
-          📤 שתף קישור לתלמידים
-        </button>
+          }}>
+            📤 שתף קישור לתלמידים
+          </button>
+        </div>
       </div>
 
       {/* פילטר */}
@@ -330,16 +360,12 @@ export default function RequestsDashboard() {
               denied: requests.filter(r => r.status === 'denied').length,
             };
             return (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                style={{
-                  padding: '6px 14px', border: '1px solid var(--bd)', borderRadius: 20,
-                  background: filter === f ? 'var(--ac)' : 'var(--bg2)',
-                  color: filter === f ? '#fff' : 'var(--ink2)',
-                  fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-                }}
-              >
+              <button key={f} onClick={() => setFilter(f)} style={{
+                padding: '6px 14px', border: '1px solid var(--bd)', borderRadius: 20,
+                background: filter === f ? 'var(--ac)' : 'var(--bg2)',
+                color: filter === f ? '#fff' : 'var(--ink2)',
+                fontWeight: 600, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+              }}>
                 {labels[f]} ({counts[f]})
               </button>
             );
@@ -361,15 +387,12 @@ export default function RequestsDashboard() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {filtered.map((req) => (
-            <div
-              key={req.id}
-              style={{
-                background: 'var(--bg2)', border: '1px solid var(--bd)',
-                borderRadius: 'var(--r)', padding: '16px 20px',
-                display: 'flex', gap: 16, alignItems: 'flex-start',
-                borderRight: `4px solid ${req.status === 'approved' ? '#2e7d32' : req.status === 'denied' ? '#c62828' : 'var(--ac)'}`,
-              }}
-            >
+            <div key={req.id} style={{
+              background: 'var(--bg2)', border: '1px solid var(--bd)',
+              borderRadius: 'var(--r)', padding: '16px 20px',
+              display: 'flex', gap: 16, alignItems: 'flex-start',
+              borderRight: `4px solid ${req.status === 'approved' ? '#2e7d32' : req.status === 'denied' ? '#c62828' : 'var(--ac)'}`,
+            }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 800, fontSize: 16 }}>{req.requesterName}</span>
@@ -384,9 +407,8 @@ export default function RequestsDashboard() {
                 )}
                 {req.response && (
                   <p style={{
-                    margin: '0 0 6px',
+                    margin: '0 0 6px', fontSize: 13, fontWeight: 600,
                     color: req.status === 'approved' ? '#0a5c36' : '#842029',
-                    fontSize: 13, fontWeight: 600,
                   }}>
                     ↩ תגובתך: {req.response}
                   </p>
@@ -395,29 +417,20 @@ export default function RequestsDashboard() {
               </div>
 
               <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                <button
-                  onClick={() => setRespondingTo(req)}
-                  style={{
-                    background: req.status === 'pending' ? 'var(--ac)' : 'var(--bg)',
-                    color: req.status === 'pending' ? '#fff' : 'var(--ink2)',
-                    border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
-                    padding: '7px 14px', fontWeight: 700, fontSize: 13,
-                    cursor: 'pointer', fontFamily: 'inherit',
-                  }}
-                >
+                <button onClick={() => setRespondingTo(req)} style={{
+                  background: req.status === 'pending' ? 'var(--ac)' : 'var(--bg)',
+                  color: req.status === 'pending' ? '#fff' : 'var(--ink2)',
+                  border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
+                  padding: '7px 14px', fontWeight: 700, fontSize: 13,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                }}>
                   {req.status === 'pending' ? 'הגב' : 'ערוך תגובה'}
                 </button>
-                <button
-                  onClick={() => { if (confirm('למחוק את הבקשה?')) removeRequest(req.classroomId, req.id); }}
-                  style={{
-                    background: 'none', border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
-                    padding: '7px 10px', color: 'var(--ink3)', cursor: 'pointer', fontFamily: 'inherit',
-                    fontSize: 15,
-                  }}
-                  title="מחק בקשה"
-                >
-                  🗑
-                </button>
+                <button onClick={() => handleDelete(req)} style={{
+                  background: 'none', border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
+                  padding: '7px 10px', color: 'var(--ink3)', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: 15,
+                }} title="מחק בקשה">🗑</button>
               </div>
             </div>
           ))}
@@ -428,7 +441,7 @@ export default function RequestsDashboard() {
         <RespondModal
           req={respondingTo}
           onClose={() => setRespondingTo(null)}
-          onRespond={(status, response) => respond(respondingTo.classroomId, respondingTo.id, status, response)}
+          onRespond={(status, response) => handleRespond(respondingTo, status, response)}
         />
       )}
 
