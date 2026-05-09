@@ -4,6 +4,7 @@ import type Konva from 'konva';
 import { useClassroomStore } from '../../store/classroomStore';
 import type { Wall, FixedElement, Point, Desk, Seat, ZoneTag } from '../../types';
 import { computeAllAutoZones } from '../../services/zoneCalculator';
+import { useZoomPan } from '../../hooks/useZoomPan';
 import DeskGridControls from './DeskGridControls';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
@@ -188,6 +189,14 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const [rubberEnd, setRubberEnd] = useState<Point | null>(null);
   const [snapGuides, setSnapGuides] = useState<{ vLines: number[]; hLines: number[] }>({ vLines: [], hLines: [] });
 
+  const { zoom, offset, isPanRef, zoomToward, startPan, movePan, endPan, toCanvas, resetView } = useZoomPan();
+
+  // multi-select drag
+  const dragStartRef = useRef<{
+    deskId: string; startX: number; startY: number;
+    others: { id: string; startX: number; startY: number }[];
+  } | null>(null);
+
   const stageRef = useRef<Konva.Stage>(null);
 
   const isSelectMode = template === 'select';
@@ -226,19 +235,29 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
 
   // ── עכבר ──────────────────────────────────────────
   const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // middle mouse — pan
+    if (e.evt.button === 1) {
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pos = stage.getPointerPosition()!;
+      startPan(pos.x, pos.y);
+      return;
+    }
     if (e.target !== stageRef.current) return;
     if (!isSelectMode) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const p = { x: pos.x, y: pos.y };
+    const p = toCanvas(pos.x, pos.y); // canvas coords
     setRubberStart(p);
     setRubberEnd(p);
     if (!e.evt.shiftKey) setSelectedIds(new Set());
   };
 
   const onStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (endPan()) return;
     if (e.target !== stageRef.current) return;
     if (!isSelectMode || !rubberStart || !rubberEnd) {
       setRubberStart(null); setRubberEnd(null);
@@ -248,7 +267,6 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     const y1 = Math.min(rubberStart.y, rubberEnd.y);
     const x2 = Math.max(rubberStart.x, rubberEnd.x);
     const y2 = Math.max(rubberStart.y, rubberEnd.y);
-    // אם הריבוע גדול מספיק — בחר את כל השולחנות בתוכו
     if (x2 - x1 > 6 || y2 - y1 > 6) {
       const inside = classroom.desks.filter((d) =>
         d.position.x >= x1 && d.position.x <= x2 && d.position.y >= y1 && d.position.y <= y2
@@ -263,16 +281,17 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
   const DESK_MARGIN = 95;
 
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (isPanRef.current) return;
     if (e.target !== stageRef.current) return;
-    if (isSelectMode) return; // טיפול ב-mouseup
+    if (isSelectMode) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const center = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
+    const cp = toCanvas(pos.x, pos.y);
+    const center = { x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) };
     const items = buildTemplate(template, center, cfg);
     items.forEach((item) => {
-      // כלוא מרכז שולחן בתוך גבולות הכיתה
       const clamped = {
         ...item.desk,
         position: {
@@ -284,15 +303,17 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     });
   };
 
-  const onStageMouseMove = () => {
+  const onStageMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
+    if (movePan(pos.x, pos.y)) return;
+    const cp = toCanvas(pos.x, pos.y);
     if (isSelectMode && rubberStart) {
-      setRubberEnd({ x: pos.x, y: pos.y });
+      setRubberEnd(cp);
     } else {
-      setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
+      setMousePos({ x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) });
     }
   };
 
@@ -343,13 +364,22 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     const h = 70;
     const zones = seats[0]?.autoZones ?? [];
 
+    const clampDesk = (x: number, y: number, seatCount: number) => {
+      const hw = (seatCount === 2 ? 130 : 80) / 2;
+      return {
+        x: Math.max(hw, Math.min(classroom.width - hw, snap(x, gridOn))),
+        y: Math.max(35, Math.min(classroom.height - 35, snap(y, gridOn))),
+      };
+    };
+
     return (
       <Group
         key={desk.id}
+        id={`desk-${desk.id}`}
         x={desk.position.x}
         y={desk.position.y}
         rotation={desk.rotation}
-        draggable={!isSelectMode}
+        draggable={isSelected || !isSelectMode}
         onClick={(e) => {
           e.cancelBubble = true;
           if (e.evt.shiftKey) {
@@ -364,27 +394,64 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           e.cancelBubble = true;
           setSelectedIds(new Set([desk.id]));
         }}
+        onDragStart={(e) => {
+          if (selectedIds.size > 1 && isSelected) {
+            dragStartRef.current = {
+              deskId: desk.id,
+              startX: e.target.x(),
+              startY: e.target.y(),
+              others: classroom.desks
+                .filter((d) => d.id !== desk.id && selectedIds.has(d.id))
+                .map((d) => ({ id: d.id, startX: d.position.x, startY: d.position.y })),
+            };
+          } else {
+            dragStartRef.current = null;
+          }
+        }}
         onDragMove={(e) => {
-          const cx = e.target.x();
-          const cy = e.target.y();
+          let cx = e.target.x();
+          let cy = e.target.y();
           const vLines: number[] = [];
           const hLines: number[] = [];
+          // snap alignment — מדלג על כל הנבחרים
           classroom.desks.forEach((other) => {
-            if (other.id === desk.id) return;
-            if (Math.abs(other.position.x - cx) <= SNAP_THRESHOLD) vLines.push(other.position.x);
-            if (Math.abs(other.position.y - cy) <= SNAP_THRESHOLD) hLines.push(other.position.y);
+            if (other.id === desk.id || selectedIds.has(other.id)) return;
+            if (Math.abs(other.position.x - cx) <= SNAP_THRESHOLD) { cx = other.position.x; vLines.push(other.position.x); }
+            if (Math.abs(other.position.y - cy) <= SNAP_THRESHOLD) { cy = other.position.y; hLines.push(other.position.y); }
           });
+          if (cx !== e.target.x() || cy !== e.target.y()) { e.target.x(cx); e.target.y(cy); }
           setSnapGuides({ vLines, hLines });
+          // גרירת מרובה
+          const info = dragStartRef.current;
+          if (info && info.deskId === desk.id) {
+            const dx = cx - info.startX;
+            const dy = cy - info.startY;
+            info.others.forEach(({ id, startX, startY }) => {
+              const node = stageRef.current?.findOne<Konva.Group>(`#desk-${id}`);
+              if (node) { node.x(startX + dx); node.y(startY + dy); }
+            });
+          }
         }}
         onDragEnd={(e) => {
           setSnapGuides({ vLines: [], hLines: [] });
-          const deskW = desk.seatCount === 2 ? 130 : 80;
-          const halfW = deskW / 2;
-          const halfH = 35;
-          const newX = Math.max(halfW, Math.min(classroom.width - halfW, snap(e.target.x(), gridOn)));
-          const newY = Math.max(halfH, Math.min(classroom.height - halfH, snap(e.target.y(), gridOn)));
-          e.target.x(newX); e.target.y(newY);
-          updateDesk(desk.id, { position: { x: newX, y: newY } });
+          const pos = clampDesk(e.target.x(), e.target.y(), desk.seatCount);
+          e.target.x(pos.x); e.target.y(pos.y);
+          updateDesk(desk.id, { position: pos });
+          // עדכן את כל הנבחרים האחרים
+          const info = dragStartRef.current;
+          if (info && info.deskId === desk.id) {
+            const dx = pos.x - info.startX;
+            const dy = pos.y - info.startY;
+            info.others.forEach(({ id, startX, startY }) => {
+              const otherDesk = classroom.desks.find((d) => d.id === id);
+              if (!otherDesk) return;
+              const oPos = clampDesk(startX + dx, startY + dy, otherDesk.seatCount);
+              const node = stageRef.current?.findOne<Konva.Group>(`#desk-${id}`);
+              if (node) { node.x(oPos.x); node.y(oPos.y); }
+              updateDesk(id, { position: oPos });
+            });
+            dragStartRef.current = null;
+          }
         }}
       >
         <Rect
@@ -544,6 +611,24 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     );
   };
 
+  const exportImage = () => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    // שמור zoom/offset זמנית, אפס, ייצא, שחזר
+    const prevScale = stage.scaleX();
+    const prevX = stage.x();
+    const prevY = stage.y();
+    stage.scale({ x: 1, y: 1 });
+    stage.position({ x: 0, y: 0 });
+    const dataURL = stage.toDataURL({ pixelRatio: 2 });
+    stage.scale({ x: prevScale, y: prevScale });
+    stage.position({ x: prevX, y: prevY });
+    const link = document.createElement('a');
+    link.download = `${classroom.name}-שולחנות.png`;
+    link.href = dataURL;
+    link.click();
+  };
+
   return (
     <div>
       {/* ── תבניות ── */}
@@ -626,6 +711,18 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
           label="מחק הכל"
           danger
         />
+        <ActionButton onClick={exportImage} emoji="💾" label="ייצא PNG" />
+        <div style={{ width: 1, height: 24, background: 'var(--bd2)' }} />
+        {/* פקדי זום */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1 / 1.2)}
+            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>−</button>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink2)', minWidth: 38, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1.2)}
+            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>+</button>
+          <button onClick={resetView}
+            style={{ fontSize: 12, fontWeight: 700, padding: '4px 8px', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer', color: 'var(--ink2)' }}>איפוס</button>
+        </div>
         <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
           <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
             <strong>{classroom.desks.length}</strong> שולחנות · <strong>{classroom.seats.length}</strong> מושבים
@@ -644,8 +741,8 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
 
       <div style={{ fontSize: 12, color: 'var(--ink3)', marginBottom: 8 }}>
         {isSelectMode
-          ? '💡 בחר שולחנות בלחיצה (Shift = הוספה לבחירה). גרור על אזור ריק ליצירת ריבוע בחירה. Delete מוחק את הנבחרים.'
-          : '💡 לחץ על המקום בקנבס להצבת התבנית. לאחר ההצבה — גרור שולחן להזיז.'}
+          ? '💡 לחץ לבחירה (Shift = הוסף). גרור על ריק = ריבוע בחירה. גרור שולחן נבחר להזזה (מרובה). Delete = מחק. גלגלת = זום, לחצן אמצעי = הזזת תצוגה.'
+          : '💡 לחץ על הקנבס להצבת התבנית. לאחר ההצבה — גרור להזזה. גלגלת = זום, לחצן אמצעי = הזזת תצוגה.'}
       </div>
 
       <DeskGridControls classroomId={classroomId}>
@@ -657,12 +754,15 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
             ref={stageRef}
             width={classroom.width}
             height={classroom.height}
+            scaleX={zoom} scaleY={zoom}
+            x={offset.x} y={offset.y}
+            onWheel={(e) => { e.evt.preventDefault(); const pos = stageRef.current?.getPointerPosition(); if (pos) zoomToward(pos.x, pos.y, e.evt.deltaY < 0 ? 1.12 : 1 / 1.12); }}
             onMouseDown={onStageMouseDown}
             onMouseUp={onStageMouseUp}
             onClick={onStageClick}
             onTap={onStageClick}
             onMouseMove={onStageMouseMove}
-            style={{ cursor: isSelectMode ? 'default' : 'crosshair', background: '#fff' }}
+            style={{ cursor: isPanRef.current ? 'grab' : (isSelectMode ? 'default' : 'crosshair'), background: '#fff' }}
           >
             <Layer listening={false}>{renderGrid()}</Layer>
             <Layer>

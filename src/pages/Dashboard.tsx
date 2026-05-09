@@ -3,6 +3,45 @@ import { useState } from 'react';
 import { useClassroomStore } from '../store/classroomStore';
 import { buildGenericClassroom } from '../services/classroomTemplates';
 
+// תצוגה מקדימה של גריד שולחנות
+function GridPreview({ rows, cols }: { rows: number; cols: number }) {
+  const W = 220, H = 140;
+  const M = 14; // margin
+  const boardH = 10;
+  const deskW = Math.min(38, (W - M * 2) / Math.max(1, cols * 1.25));
+  const deskH = Math.min(22, (H - M * 2 - boardH - 8) / Math.max(1, rows * 1.3));
+  const colGap = cols > 1 ? (W - M * 2 - deskW * cols) / (cols - 1) : 0;
+  const rowGap = rows > 1 ? (H - M * 2 - boardH - 8 - deskH * rows) / (rows - 1) : 0;
+
+  const desks = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      desks.push({
+        x: M + c * (deskW + colGap),
+        y: M + boardH + 8 + r * (deskH + rowGap),
+      });
+    }
+  }
+
+  return (
+    <svg width={W} height={H} style={{ border: '1px solid var(--bd)', borderRadius: 8, background: '#fff', display: 'block' }}>
+      {/* לוח */}
+      <rect x={M} y={M} width={W - M * 2} height={boardH} rx={2} fill="#7c3aed" opacity={0.75} />
+      <text x={W / 2} y={M + 7} textAnchor="middle" fontSize={6} fill="#fff" fontFamily="Heebo">לוח</text>
+      {/* שולחנות */}
+      {desks.map((d, i) => (
+        <rect key={i} x={d.x} y={d.y} width={deskW} height={deskH} rx={2}
+              fill="#e7e5e4" stroke="#a8a29e" strokeWidth={0.8} />
+      ))}
+    </svg>
+  );
+}
+
+const getSavedInt = (key: string, def: number) => {
+  const v = parseInt(localStorage.getItem(key) ?? '', 10);
+  return isNaN(v) ? def : Math.max(1, Math.min(10, v));
+};
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const classrooms = useClassroomStore((s) => s.classrooms);
@@ -15,11 +54,14 @@ export default function Dashboard() {
 
   const [showNew, setShowNew] = useState(false);
   const [newName, setNewName] = useState('');
-  const [tplRows, setTplRows] = useState(4);
-  const [tplCols, setTplCols] = useState(5);
+  const [tplRows, setTplRows] = useState(() => getSavedInt('sg_tpl_rows', 4));
+  const [tplCols, setTplCols] = useState(() => getSavedInt('sg_tpl_cols', 5));
   const [withTemplate, setWithTemplate] = useState(true);
 
   const list = Object.values(classrooms);
+
+  const setRows = (v: number) => { setTplRows(v); localStorage.setItem('sg_tpl_rows', String(v)); };
+  const setCols = (v: number) => { setTplCols(v); localStorage.setItem('sg_tpl_cols', String(v)); };
 
   const onCreate = () => {
     const name = newName.trim() || 'כיתה חדשה';
@@ -99,36 +141,37 @@ export default function Dashboard() {
 
             {withTemplate && (
               <div style={{ display: 'flex', gap: 12 }}>
-                <label style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>
-                    שורות (מימין לשמאל)
+                <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end' }}>
+                  <label style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>שורות (מימין לשמאל)</div>
+                    <input
+                      type="number" min={1} max={10} value={tplRows}
+                      onChange={(e) => setRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                      style={{
+                        width: '100%', padding: '8px 12px', fontSize: 15, fontWeight: 700,
+                        border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+                        fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
+                      }}
+                    />
+                  </label>
+                  <label style={{ flex: 1 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>טורים (מלמעלה למטה)</div>
+                    <input
+                      type="number" min={1} max={10} value={tplCols}
+                      onChange={(e) => setCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                      style={{
+                        width: '100%', padding: '8px 12px', fontSize: 15, fontWeight: 700,
+                        border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+                        fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
+                      }}
+                    />
+                  </label>
+                  <div style={{ alignSelf: 'flex-end', fontSize: 12, color: '#9a3412', paddingBottom: 8, whiteSpace: 'nowrap' }}>
+                    = <strong>{tplRows * tplCols}</strong> שולחנות
                   </div>
-                  <input
-                    type="number" min={1} max={10} value={tplRows}
-                    onChange={(e) => setTplRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
-                    style={{
-                      width: '100%', padding: '8px 12px', fontSize: 15, fontWeight: 700,
-                      border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
-                      fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
-                    }}
-                  />
-                </label>
-                <label style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 3, color: '#9a3412' }}>
-                    טורים (מלמעלה למטה)
-                  </div>
-                  <input
-                    type="number" min={1} max={10} value={tplCols}
-                    onChange={(e) => setTplCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
-                    style={{
-                      width: '100%', padding: '8px 12px', fontSize: 15, fontWeight: 700,
-                      border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
-                      fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
-                    }}
-                  />
-                </label>
-                <div style={{ alignSelf: 'flex-end', fontSize: 12, color: '#9a3412', paddingBottom: 8 }}>
-                  = <strong>{tplRows * tplCols}</strong> שולחנות
+                </div>
+                <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+                  <GridPreview rows={tplRows} cols={tplCols} />
                 </div>
               </div>
             )}

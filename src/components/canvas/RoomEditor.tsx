@@ -5,6 +5,7 @@ import { useClassroomStore } from '../../store/classroomStore';
 import type { WallType, FixedElementType, Point, Wall, FixedElement, Desk } from '../../types';
 import { buildGenericClassroom } from '../../services/classroomTemplates';
 import { tryEmbedDoor, tryEmbedSegment, projectOntoWall } from '../../services/wallGeometry';
+import { useZoomPan } from '../../hooks/useZoomPan';
 
 const WALL_STYLES: Record<WallType, { color: string; width: number; dash?: number[]; label: string; emoji: string }> = {
   blank:        { color: '#1c1917', width: 6,                       label: 'קיר אטום',    emoji: '⬛' },
@@ -113,10 +114,14 @@ export default function RoomEditor({ classroomId }: Props) {
 
   // מודאל בניית כיתה רגילה
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
-  const [tplRows, setTplRows] = useState(4);
-  const [tplCols, setTplCols] = useState(5);
+  const getSaved = (key: string, def: number) => { const v = parseInt(localStorage.getItem(key) ?? '', 10); return isNaN(v) ? def : Math.max(1, Math.min(10, v)); };
+  const [tplRows, setTplRows] = useState(() => getSaved('sg_tpl_rows', 4));
+  const [tplCols, setTplCols] = useState(() => getSaved('sg_tpl_cols', 5));
+  const setRows = (v: number) => { setTplRows(v); localStorage.setItem('sg_tpl_rows', String(v)); };
+  const setCols = (v: number) => { setTplCols(v); localStorage.setItem('sg_tpl_cols', String(v)); };
 
   const stageRef = useRef<Konva.Stage>(null);
+  const { zoom, offset, isPanRef, zoomToward, startPan, movePan, endPan, toCanvas, resetView } = useZoomPan();
 
   const isSelectTool = tool === 'select';
   const isManualWallTool = tool === 'blank' || tool === 'board' || tool === 'window_lobby' || tool === 'window_yard' || tool === 'small_window';
@@ -214,28 +219,51 @@ export default function RoomEditor({ classroomId }: Props) {
 
   if (!classroom) return null;
 
+  // snap לנקודות קצה של קירות קיימים
+  const snapToEndpoints = (p: Point, threshold = 14): Point => {
+    for (const wall of classroom.walls) {
+      for (const wp of wall.points) {
+        if (Math.abs(wp.x - p.x) <= threshold && Math.abs(wp.y - p.y) <= threshold) {
+          return { x: wp.x, y: wp.y };
+        }
+      }
+    }
+    return p;
+  };
+
   // ── טיפול בעכבר ──────────────────────────────────
   const onStageMouseDown = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    // middle mouse — pan
+    if (e.evt.button === 1) {
+      e.evt.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      const pos = stage.getPointerPosition()!;
+      startPan(pos.x, pos.y);
+      return;
+    }
     if (e.target !== stageRef.current) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    const p: Point = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
+    const cp = toCanvas(pos.x, pos.y);
+    const p: Point = { x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) };
 
     if (isShapeTool) {
       setShapeStart(p);
       return;
     }
     if (isSelectTool) {
-      setRubberStart({ x: pos.x, y: pos.y });
-      setRubberEnd({ x: pos.x, y: pos.y });
+      setRubberStart(p);
+      setRubberEnd(p);
       if (!e.evt.shiftKey) clearSelection();
       return;
     }
   };
 
   const onStageMouseUp = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (endPan()) return;
     if (e.target !== stageRef.current) return;
 
     // צורות
@@ -244,7 +272,8 @@ export default function RoomEditor({ classroomId }: Props) {
       if (stage) {
         const pos = stage.getPointerPosition();
         if (pos) {
-          const p: Point = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
+          const cp = toCanvas(pos.x, pos.y);
+          const p: Point = { x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) };
           const dx = Math.abs(p.x - shapeStart.x);
           const dy = Math.abs(p.y - shapeStart.y);
           let topLeft: Point, bottomRight: Point;
@@ -295,16 +324,17 @@ export default function RoomEditor({ classroomId }: Props) {
   };
 
   const onStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    if (isPanRef.current) return;
     if (e.target !== stageRef.current) return;
     if (isShapeTool || isSelectTool) return;
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
-    let p: Point = { x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) };
+    const cp = toCanvas(pos.x, pos.y);
+    let p: Point = snapToEndpoints({ x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) });
 
     if (isDoorTool) {
-      // אם לחצנו על קיר קיים — נטמיע את הדלת בתוכו (ניהפך אותו לדלת בקטע הזה)
       const embed = tryEmbedDoor(classroom.walls, p);
       if (embed) {
         removeWall(embed.removeWallId);
@@ -320,6 +350,7 @@ export default function RoomEditor({ classroomId }: Props) {
         const prev = drafting[drafting.length - 1];
         p = snapToAxis(prev, p);
       }
+      p = snapToEndpoints(p);
       if (!drafting) {
         setDrafting([p]);
         setDraftingType(tool as WallType);
@@ -339,18 +370,20 @@ export default function RoomEditor({ classroomId }: Props) {
 
   const onStageDblClick = () => { if (drafting) finishDraft(); };
 
-  const onStageMouseMove = () => {
+  const onStageMouseMove = (_e: Konva.KonvaEventObject<MouseEvent>) => {
     const stage = stageRef.current;
     if (!stage) return;
     const pos = stage.getPointerPosition();
     if (!pos) return;
+    if (movePan(pos.x, pos.y)) return;
+    const cp = toCanvas(pos.x, pos.y);
     if (isSelectTool && rubberStart) {
-      setRubberEnd({ x: pos.x, y: pos.y });
+      setRubberEnd(cp);
     } else {
-      setMousePos({ x: snap(pos.x, gridOn), y: snap(pos.y, gridOn) });
+      setMousePos({ x: snap(cp.x, gridOn), y: snap(cp.y, gridOn) });
     }
     if (isDoorTool) {
-      computeDoorPreview({ x: pos.x, y: pos.y });
+      computeDoorPreview(cp);
     } else if (doorPreview) {
       setDoorPreview(null);
     }
@@ -712,6 +745,17 @@ export default function RoomEditor({ classroomId }: Props) {
           }}
           emoji="🧨" danger label="מחק הכל" />
         {drafting && <ActionButton onClick={finishDraft} emoji="✓" label="סיים קיר" />}
+        <div style={{ width: 1, height: 24, background: 'var(--bd2)', marginInline: 4 }} />
+        {/* פקדי זום */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1 / 1.2)}
+            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>−</button>
+          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink2)', minWidth: 38, textAlign: 'center' }}>{Math.round(zoom * 100)}%</span>
+          <button onClick={() => zoomToward(classroom.width / 2, classroom.height / 2, 1.2)}
+            style={{ width: 28, height: 28, fontSize: 16, fontWeight: 800, border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer' }}>+</button>
+          <button onClick={resetView}
+            style={{ fontSize: 12, fontWeight: 700, padding: '4px 8px', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', background: 'var(--bg2)', cursor: 'pointer', color: 'var(--ink2)' }}>איפוס</button>
+        </div>
         <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
           {totalSelected > 1 && (
             <span style={{ fontSize: 13, color: 'var(--ac)', fontWeight: 700 }}>
@@ -782,11 +826,13 @@ export default function RoomEditor({ classroomId }: Props) {
       }}>
         <Stage ref={stageRef}
           width={classroom.width} height={classroom.height}
+          scaleX={zoom} scaleY={zoom} x={offset.x} y={offset.y}
+          onWheel={(e) => { e.evt.preventDefault(); const pos = stageRef.current?.getPointerPosition(); if (pos) zoomToward(pos.x, pos.y, e.evt.deltaY < 0 ? 1.12 : 1 / 1.12); }}
           onMouseDown={onStageMouseDown} onMouseUp={onStageMouseUp}
           onClick={onStageClick} onTap={onStageClick}
           onDblClick={onStageDblClick}
           onMouseMove={onStageMouseMove}
-          style={{ cursor: isSelectTool ? 'default' : 'crosshair', background: '#fff' }}>
+          style={{ cursor: isPanRef.current ? 'grab' : (isSelectTool ? 'default' : 'crosshair'), background: '#fff' }}>
           <Layer listening={false}>{renderGrid()}</Layer>
           <Layer>
             {showDesks && classroom.desks.map(renderDeskReadOnly)}
@@ -829,11 +875,11 @@ export default function RoomEditor({ classroomId }: Props) {
             <p style={{ fontSize: 13, color: 'var(--ink2)', margin: '0 0 20px' }}>
               חדר מלבני עם לוח בתחתית, שולחן מורה ליד הלוח, וגריד שולחנות זוגיים.
             </p>
-            <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
               <label style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>שורות (מימין לשמאל)</div>
                 <input type="number" min={1} max={10} value={tplRows}
-                  onChange={(e) => setTplRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                  onChange={(e) => setRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
                   style={{
                     width: '100%', padding: '10px 14px', fontSize: 16, fontWeight: 700,
                     border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
@@ -843,13 +889,33 @@ export default function RoomEditor({ classroomId }: Props) {
               <label style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>טורים (מלמעלה למטה)</div>
                 <input type="number" min={1} max={10} value={tplCols}
-                  onChange={(e) => setTplCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                  onChange={(e) => setCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
                   style={{
                     width: '100%', padding: '10px 14px', fontSize: 16, fontWeight: 700,
                     border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
                     fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box',
                   }} />
               </label>
+            </div>
+            {/* תצוגה מקדימה */}
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 14 }}>
+              {(() => {
+                const W = 260, H = 150, M = 14, boardH = 10;
+                const deskW = Math.min(38, (W - M * 2) / Math.max(1, tplCols * 1.25));
+                const deskH = Math.min(22, (H - M * 2 - boardH - 8) / Math.max(1, tplRows * 1.3));
+                const colGap = tplCols > 1 ? (W - M * 2 - deskW * tplCols) / (tplCols - 1) : 0;
+                const rowGap = tplRows > 1 ? (H - M * 2 - boardH - 8 - deskH * tplRows) / (tplRows - 1) : 0;
+                const desks: { x: number; y: number }[] = [];
+                for (let r = 0; r < tplRows; r++) for (let c = 0; c < tplCols; c++)
+                  desks.push({ x: M + c * (deskW + colGap), y: M + boardH + 8 + r * (deskH + rowGap) });
+                return (
+                  <svg width={W} height={H} style={{ border: '1px solid var(--bd)', borderRadius: 8, background: '#fff' }}>
+                    <rect x={M} y={M} width={W - M * 2} height={boardH} rx={2} fill="#7c3aed" opacity={0.75} />
+                    <text x={W / 2} y={M + 7} textAnchor="middle" fontSize={6} fill="#fff" fontFamily="Heebo">לוח</text>
+                    {desks.map((d, i) => <rect key={i} x={d.x} y={d.y} width={deskW} height={deskH} rx={2} fill="#e7e5e4" stroke="#a8a29e" strokeWidth={0.8} />)}
+                  </svg>
+                );
+              })()}
             </div>
             <div style={{ fontSize: 13, color: 'var(--ink3)', marginBottom: 16 }}>
               סך הכל: <strong style={{ color: 'var(--ac)' }}>{tplRows * tplCols}</strong> שולחנות
