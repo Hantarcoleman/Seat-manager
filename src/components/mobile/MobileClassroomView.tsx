@@ -36,7 +36,7 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
   const [activeTab, setActiveTab] = useState<MobileTab>(initialTab);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkText, setBulkText] = useState('');
-  const [bulkGender, setBulkGender] = useState<'unknown' | 'm' | 'f'>('unknown');
+  const [bulkGender, setBulkGender] = useState<'m' | 'f' | undefined>(undefined);
   const [bulkDone, setBulkDone] = useState(false);
   const navigate = useNavigate();
   const isPortrait = useIsPortrait();
@@ -172,8 +172,8 @@ export default function MobileClassroomView({ classroomId, initialTab = 'seating
 
                   {/* מין */}
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-                    {([['unknown', '🙂 לא מוגדר'], ['m', '👦 בנים'], ['f', '👧 בנות']] as const).map(([val, label]) => (
-                      <button key={val} onClick={() => setBulkGender(val)}
+                    {([[undefined, '🙂 לא מוגדר'], ['m', '👦 בנים'], ['f', '👧 בנות']] as const).map(([val, label]) => (
+                      <button key={val ?? 'none'} onClick={() => setBulkGender(val)}
                         style={{
                           flex: 1, padding: '8px 4px', fontSize: 13, fontWeight: 700, fontFamily: 'inherit',
                           background: bulkGender === val ? 'var(--ac)' : 'var(--bg2)',
