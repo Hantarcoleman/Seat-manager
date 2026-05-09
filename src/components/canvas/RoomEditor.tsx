@@ -20,6 +20,7 @@ type ToolMode = 'select' | WallType | FixedElementType | ShapeType;
 
 interface Props {
   classroomId: string;
+  isMobile?: boolean;
 }
 
 const snap = (v: number, gridOn: boolean) => (gridOn ? Math.round(v / 10) * 10 : v);
@@ -72,7 +73,7 @@ function wallIntersectsRect(w: Wall, r: { x1: number; y1: number; x2: number; y2
   return !(wx2 < r.x1 || wx1 > r.x2 || wy2 < r.y1 || wy1 > r.y2);
 }
 
-export default function RoomEditor({ classroomId }: Props) {
+export default function RoomEditor({ classroomId, isMobile = false }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const addWall = useClassroomStore((s) => s.addWall);
   const addWalls = useClassroomStore((s) => s.addWalls);
@@ -659,6 +660,155 @@ export default function RoomEditor({ classroomId }: Props) {
   const selectedWall = selectedWallIds.size === 1
     ? classroom.walls.find((w) => w.id === Array.from(selectedWallIds)[0])
     : null;
+
+  // ── מצב מובייל ──────────────────────────────────────────────
+  if (isMobile) {
+    const mobileScale = window.innerWidth / classroom.width;
+    const stageW = Math.round(classroom.width * mobileScale);
+    const stageH = Math.round(classroom.height * mobileScale);
+
+    const mobileBtn = (label: string, emoji: string, onClick: () => void, active = false, color?: string) => (
+      <button
+        onClick={onClick}
+        style={{
+          background: active ? (color ?? 'var(--ac)') : 'var(--bg2)',
+          color: active ? '#fff' : 'var(--ink)',
+          border: `1.5px solid ${active ? (color ?? 'var(--ac)') : 'var(--bd2)'}`,
+          borderRadius: 'var(--rs)', padding: '10px 14px', fontSize: 13, fontWeight: 700,
+          cursor: 'pointer', fontFamily: 'inherit', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', gap: 3, minWidth: 60, flexShrink: 0,
+        }}
+      >
+        <span style={{ fontSize: 20 }}>{emoji}</span>
+        <span style={{ fontSize: 11 }}>{label}</span>
+      </button>
+    );
+
+    return (
+      <div>
+        {/* שורת תבניות */}
+        <div style={{
+          padding: '10px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
+          display: 'flex', gap: 8, overflowX: 'auto',
+        }}>
+          {mobileBtn('בחירה', '↖', () => switchTool('select'), tool === 'select')}
+          <div style={{ width: 1, flexShrink: 0, background: 'var(--bd2)', margin: '4px 0' }} />
+          {mobileBtn('מלבן', '▭', () => switchTool('shape_rect'), tool === 'shape_rect')}
+          {mobileBtn("L-shape", '⌐', () => switchTool('shape_l'), tool === 'shape_l')}
+          {mobileBtn('כיתה רגילה', '🏫', () => setShowTemplateDialog(true))}
+          <div style={{ width: 1, flexShrink: 0, background: 'var(--bd2)', margin: '4px 0' }} />
+          {mobileBtn('מורה', '🪑', () => switchTool('teacher_desk_single'), tool === 'teacher_desk_single')}
+        </div>
+
+        {/* שינוי סוג קיר נבחר */}
+        {selectedWall && (
+          <div style={{
+            padding: '8px 12px', background: '#fff7ed', borderBottom: '1.5px solid #fed7aa',
+            display: 'flex', gap: 6, overflowX: 'auto', alignItems: 'center',
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#9a3412', flexShrink: 0 }}>סוג קיר:</span>
+            {(Object.keys(WALL_STYLES) as WallType[]).map((wt) => (
+              <button key={wt}
+                onClick={() => updateWall(selectedWall.id, { type: wt })}
+                style={{
+                  background: selectedWall.type === wt ? WALL_STYLES[wt].color : 'var(--bg2)',
+                  color: selectedWall.type === wt ? '#fff' : 'var(--ink)',
+                  border: `1.5px solid ${WALL_STYLES[wt].color}`,
+                  borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: 'inherit', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}>
+                {WALL_STYLES[wt].emoji} {WALL_STYLES[wt].label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* קנבס מסוקל */}
+        <div style={{ overflowX: 'hidden', overflowY: 'auto' }}>
+          <Stage ref={stageRef}
+            width={stageW} height={stageH}
+            scaleX={mobileScale} scaleY={mobileScale}
+            onMouseDown={onStageMouseDown} onMouseUp={onStageMouseUp}
+            onClick={onStageClick} onTap={onStageClick}
+            onDblClick={onStageDblClick} onMouseMove={onStageMouseMove}
+            style={{ cursor: isSelectTool ? 'default' : 'crosshair', background: '#fff', display: 'block' }}>
+            <Layer listening={false}>{renderGrid()}</Layer>
+            <Layer>
+              {showDesks && classroom.desks.map(renderDeskReadOnly)}
+              {classroom.walls.map(renderWall)}
+              {classroom.fixedElements.map(renderFixedElement)}
+              {renderDraft()}
+              {renderShapePreview()}
+              {renderRubberBand()}
+            </Layer>
+          </Stage>
+        </div>
+
+        {/* ביטול / מחיקה */}
+        <div style={{ padding: '8px 12px', display: 'flex', gap: 8, background: 'var(--bg2)', borderTop: '1px solid var(--bd)' }}>
+          <button onClick={smartUndo} disabled={historyDepth === 0 && !drafting}
+            style={{ flex: 1, padding: '10px', fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
+              background: 'var(--bg)', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', cursor: 'pointer' }}>
+            ↶ ביטול
+          </button>
+          <button onClick={() => deleteSelected()} disabled={totalSelected === 0}
+            style={{ flex: 1, padding: '10px', fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
+              background: totalSelected > 0 ? '#fef2f2' : 'var(--bg)', color: totalSelected > 0 ? 'var(--rd)' : 'var(--ink3)',
+              border: `1.5px solid ${totalSelected > 0 ? '#fecaca' : 'var(--bd)'}`,
+              borderRadius: 'var(--rs)', cursor: totalSelected > 0 ? 'pointer' : 'not-allowed' }}>
+            🗑 מחק נבחר
+          </button>
+        </div>
+
+        {/* מודאל בניית כיתה רגילה */}
+        {showTemplateDialog && (
+          <div style={{
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 200,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }} onClick={() => setShowTemplateDialog(false)}>
+            <div onClick={(e) => e.stopPropagation()} style={{
+              background: 'var(--bg2)', borderRadius: 'var(--r)', padding: 24,
+              maxWidth: 340, width: '92%', boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+            }}>
+              <h2 style={{ fontSize: 18, fontWeight: 800, margin: '0 0 12px' }}>🏫 כיתה רגילה</h2>
+              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                <label style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>שורות</div>
+                  <input type="number" min={1} max={10} value={tplRows}
+                    onChange={(e) => setRows(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                    style={{ width: '100%', padding: '10px', fontSize: 16, fontWeight: 700,
+                      border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+                      fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box' }} />
+                </label>
+                <label style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>טורים</div>
+                  <input type="number" min={1} max={10} value={tplCols}
+                    onChange={(e) => setCols(Math.max(1, Math.min(10, Number(e.target.value) || 1)))}
+                    style={{ width: '100%', padding: '10px', fontSize: 16, fontWeight: 700,
+                      border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+                      fontFamily: 'inherit', textAlign: 'center', boxSizing: 'border-box' }} />
+                </label>
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--ink3)', marginBottom: 16 }}>
+                סך הכל: <strong style={{ color: 'var(--ac)' }}>{tplRows * tplCols}</strong> שולחנות
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => setShowTemplateDialog(false)}
+                  style={{ flex: 1, padding: '12px', fontWeight: 700, fontSize: 14, fontFamily: 'inherit',
+                    background: 'var(--bg)', border: '1.5px solid var(--bd2)',
+                    borderRadius: 'var(--rs)', cursor: 'pointer' }}>ביטול</button>
+                <button onClick={applyGenericTemplate}
+                  style={{ flex: 1, padding: '12px', fontWeight: 800, fontSize: 14, fontFamily: 'inherit',
+                    background: 'var(--ac)', color: '#fff', border: 'none',
+                    borderRadius: 'var(--rs)', cursor: 'pointer' }}>צור כיתה</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div>

@@ -13,6 +13,7 @@ import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
 import StudentManager from '../students/StudentManager';
+import DeskLayoutEditor from './DeskLayoutEditor';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -23,9 +24,9 @@ const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[
   board:        { color: '#7c3aed', width: 8 },
 };
 
-interface Props { classroomId: string; }
+interface Props { classroomId: string; isMobile?: boolean; }
 
-export default function SeatingEditor({ classroomId }: Props) {
+export default function SeatingEditor({ classroomId, isMobile = false }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const updateDesk = useClassroomStore((s) => s.updateDesk);
   const addDesk = useClassroomStore((s) => s.addDesk);
@@ -76,6 +77,7 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const exportBtnRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<Konva.Stage>(null);
+  const [mobileDesksMode, setMobileDesksMode] = useState(false);
 
   const user = useAuthStore((s) => s.user);
   const listForClassroom = useArrangementStore((s) => s.listForClassroom);
@@ -900,6 +902,206 @@ const [pickedStudentId, setPickedStudentId] = useState<string | null>(null);
       </Group>
     );
   };
+
+  // ── מצב מובייל ──────────────────────────────────────────────
+  if (isMobile) {
+    const mobileScale = window.innerWidth / classroom.width;
+    const stageW = Math.round(classroom.width * mobileScale);
+    const stageH = Math.round(classroom.height * mobileScale);
+
+    const mobileBtn = (
+      label: string, onClick: () => void,
+      opts?: { disabled?: boolean; active?: boolean; danger?: boolean; emoji?: string }
+    ) => {
+      const { disabled = false, active = false, danger = false, emoji } = opts ?? {};
+      return (
+        <button
+          onClick={onClick}
+          disabled={disabled}
+          style={{
+            background: active ? 'var(--ac)' : danger ? '#fef2f2' : 'var(--bg)',
+            color: active ? '#fff' : danger ? 'var(--rd)' : disabled ? 'var(--ink3)' : 'var(--ink)',
+            border: `1.5px solid ${active ? 'var(--ac)' : danger ? '#fecaca' : 'var(--bd2)'}`,
+            borderRadius: 'var(--rs)', padding: '10px 14px', fontSize: 13, fontWeight: 700,
+            cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1,
+            fontFamily: 'inherit', whiteSpace: 'nowrap', flexShrink: 0,
+            display: 'flex', alignItems: 'center', gap: 5,
+          }}
+        >
+          {emoji && <span>{emoji}</span>}{label}
+        </button>
+      );
+    };
+
+    return (
+      <div>
+        {/* פס פעולות עליון */}
+        <div style={{
+          padding: '8px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
+          display: 'flex', gap: 8, overflowX: 'auto', alignItems: 'center',
+        }}>
+          {mobileBtn(generating ? '⏳ מחשב...' : '✨ סידור AI', generateWithAI, {
+            disabled: generating || students.length === 0 || classroom.seats.length === 0,
+            emoji: generating ? undefined : undefined,
+          })}
+          {mobileBtn('↶', undo, { disabled: undoStack.length === 0 })}
+          {mobileBtn('↷', redo, { disabled: redoStack.length === 0 })}
+          {mobileBtn('✏️ שולחנות', () => setMobileDesksMode((v) => !v), { active: mobileDesksMode })}
+          {!mobileDesksMode && pickedStudentId && mobileBtn('❌ בטל בחירה', () => setPickedStudentId(null), { danger: true })}
+        </div>
+
+        {/* קנבס / עורך שולחנות */}
+        {mobileDesksMode ? (
+          <DeskLayoutEditor classroomId={classroomId} isMobile />
+        ) : (
+          <div>
+            {/* הודעת הדרכה */}
+            {pickedStudentId && (
+              <div style={{
+                padding: '6px 14px', background: '#fff7ed',
+                borderBottom: '1px solid #fed7aa', fontSize: 13, color: '#9a3412', fontWeight: 600,
+              }}>
+                👆 {students.find((s) => s.id === pickedStudentId)?.name ?? ''} נבחר — לחץ על מושב לשיבוץ
+              </div>
+            )}
+
+            {/* Stage מסוקל */}
+            <div
+              style={{ position: 'relative', overflowX: 'hidden' }}
+              onDragOver={onCanvasDragOver}
+              onDrop={onCanvasDrop}
+            >
+              <Stage
+                ref={stageRef}
+                width={stageW} height={stageH}
+                scaleX={mobileScale} scaleY={mobileScale}
+                style={{ background: '#fff', display: 'block', cursor: pickedStudentId ? 'crosshair' : 'default' }}
+                onClick={(e) => { if (e.target === e.target.getStage()) setSelectedDeskId(null); }}
+              >
+                <Layer>
+                  {classroom.walls.map(renderWall)}
+                  {classroom.fixedElements.map(renderTeacherDesk)}
+                  {classroom.desks.map(renderDesk)}
+                  {renderSnapGuides()}
+                </Layer>
+              </Stage>
+
+              {/* שיבוץ מהיר */}
+              {quickAssign && (
+                <div style={{
+                  position: 'absolute',
+                  left: Math.min(quickAssign.x * mobileScale - 70, stageW - 168),
+                  top: Math.max(4, quickAssign.y * mobileScale - 90),
+                  zIndex: 200, background: '#fff',
+                  border: '1.5px solid var(--bd)', borderRadius: 10,
+                  boxShadow: '0 4px 20px rgba(0,0,0,.18)', padding: 8, minWidth: 164, direction: 'rtl',
+                }}>
+                  <input
+                    autoFocus value={quickSearch}
+                    onChange={(e) => setQuickSearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') { setQuickAssign(null); setQuickSearch(''); }
+                      if (e.key === 'Enter') {
+                        const first = unassigned.find((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim()));
+                        if (first) { assignToSeat(quickAssign.seatId, first.id); setQuickAssign(null); setQuickSearch(''); }
+                      }
+                    }}
+                    onBlur={() => setTimeout(() => { setQuickAssign(null); setQuickSearch(''); }, 150)}
+                    placeholder="🔍 שם תלמיד..."
+                    style={{ width: '100%', padding: '5px 8px', fontSize: 13,
+                      border: '1px solid var(--bd)', borderRadius: 6,
+                      fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box' }}
+                  />
+                  <div style={{ maxHeight: 148, overflowY: 'auto', marginTop: 4 }}>
+                    {unassigned.filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim())).slice(0, 8).map((s) => (
+                      <div key={s.id}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => { assignToSeat(quickAssign.seatId, s.id); setQuickAssign(null); setQuickSearch(''); }}
+                        style={{ padding: '5px 8px', cursor: 'pointer', fontSize: 13, borderRadius: 5 }}
+                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = '#f3f4f6'; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = ''; }}
+                      >
+                        {s.name}
+                      </div>
+                    ))}
+                    {unassigned.filter((s) => !quickSearch.trim() || s.name.includes(quickSearch.trim())).length === 0 && (
+                      <div style={{ fontSize: 12, color: 'var(--ink3)', padding: '5px 8px' }}>אין תוצאות</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* פאנל ממתינים */}
+        {!mobileDesksMode && (
+          <div style={{
+            padding: 12, background: 'var(--bg2)', borderTop: '1px solid var(--bd)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 800 }}>⏳ ממתינים ({unassigned.length})</span>
+              {assignments.length > 0 && (
+                <span style={{ fontSize: 12, color: 'var(--ink3)' }}>· {assignments.length} משובצים</span>
+              )}
+              <button
+                onClick={onParkingDrop}
+                disabled={!pickedStudentId || !studentToSeatId.has(pickedStudentId)}
+                style={{
+                  marginRight: 'auto', padding: '4px 10px', fontSize: 12, fontWeight: 700,
+                  background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg)',
+                  color: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#9a3412' : 'var(--ink3)',
+                  border: `1.5px solid ${pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fed7aa' : 'var(--bd)'}`,
+                  borderRadius: 'var(--rs)', cursor: 'pointer', fontFamily: 'inherit',
+                }}
+              >
+                ← החזר לממתינים
+              </button>
+            </div>
+
+            <input
+              type="text" value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="🔍 חיפוש תלמיד..."
+              style={{ width: '100%', padding: '7px 10px', fontSize: 13, marginBottom: 8,
+                border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
+                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box' }}
+            />
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {filteredUnassigned.length === 0 ? (
+                <div style={{ fontSize: 13, color: 'var(--ink3)', padding: '4px 0' }}>
+                  {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
+                </div>
+              ) : filteredUnassigned.map((s) => {
+                const isP = pickedStudentId === s.id;
+                const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
+                const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+                return (
+                  <button
+                    key={s.id}
+                    draggable
+                    onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
+                    onDragEnd={() => setDraggedStudentId(null)}
+                    onClick={() => onParkingStudentClick(s.id)}
+                    style={{
+                      background: isP ? '#fff7ed' : bg, color,
+                      border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                      borderRadius: 'var(--rx)', padding: '6px 12px', fontSize: 13, fontWeight: 700,
+                      cursor: 'pointer', fontFamily: 'inherit',
+                    }}
+                  >
+                    {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   // ── UI ────────────────────────────────────────────────────────
   return (

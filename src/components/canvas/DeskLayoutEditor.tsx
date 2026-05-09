@@ -29,6 +29,7 @@ type TemplateType = 'select' | 'single' | 'pair' | 'row' | 'column' | 'grid' | '
 
 interface Props {
   classroomId: string;
+  isMobile?: boolean;
 }
 
 const snap = (v: number, gridOn: boolean) => (gridOn ? Math.round(v / 10) * 10 : v);
@@ -163,7 +164,7 @@ const NEEDS_COUNT = (t: TemplateType) => t === 'row' || t === 'column';
 const NEEDS_GRID = (t: TemplateType) => t === 'grid';
 const NEEDS_GAP = (t: TemplateType) => t === 'row' || t === 'column' || t === 'grid' || t === 'cluster' || t === 'het' || t === 'u';
 
-export default function DeskLayoutEditor({ classroomId }: Props) {
+export default function DeskLayoutEditor({ classroomId, isMobile = false }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const addDesk = useClassroomStore((s) => s.addDesk);
   const updateDesk = useClassroomStore((s) => s.updateDesk);
@@ -609,6 +610,149 @@ export default function DeskLayoutEditor({ classroomId }: Props) {
     link.href = dataURL;
     link.click();
   };
+
+  // ── מצב מובייל ──────────────────────────────────────────────
+  if (isMobile) {
+    const mobileScale = window.innerWidth / classroom.width;
+    const stageW = Math.round(classroom.width * mobileScale);
+    const stageH = Math.round(classroom.height * mobileScale);
+
+    const MOBILE_TEMPLATES: { type: TemplateType; emoji: string; label: string }[] = [
+      { type: 'select',  emoji: '↖', label: 'בחר' },
+      { type: 'single',  emoji: '⬜', label: 'יחיד' },
+      { type: 'pair',    emoji: '⬛', label: 'זוג' },
+      { type: 'row',     emoji: '▬', label: 'שורה' },
+      { type: 'cluster', emoji: '⊞', label: 'גוש' },
+      { type: 'het',     emoji: 'ח', label: 'ח-צורה' },
+      { type: 'u',       emoji: 'U', label: 'U-צורה' },
+    ];
+
+    return (
+      <div>
+        {/* שורת תבניות */}
+        <div style={{
+          padding: '10px 12px', background: 'var(--bg2)', borderBottom: '1px solid var(--bd)',
+          display: 'flex', gap: 8, overflowX: 'auto',
+        }}>
+          {MOBILE_TEMPLATES.map(({ type, emoji, label }) => {
+            const active = template === type;
+            return (
+              <button key={type}
+                onClick={() => { setTemplate(type); setSelectedIds(new Set()); }}
+                style={{
+                  background: active ? 'var(--ac)' : 'var(--bg2)',
+                  color: active ? '#fff' : 'var(--ink)',
+                  border: `1.5px solid ${active ? 'var(--ac)' : 'var(--bd2)'}`,
+                  borderRadius: 'var(--rs)', padding: '10px 14px', fontSize: 13, fontWeight: 700,
+                  cursor: 'pointer', fontFamily: 'inherit',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                  minWidth: 58, flexShrink: 0,
+                }}>
+                <span style={{ fontSize: 20 }}>{emoji}</span>
+                <span style={{ fontSize: 11 }}>{label}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* הגדרות תבנית (כמות / שורות / טורים) */}
+        {!isSelectMode && (NEEDS_COUNT(template) || NEEDS_GRID(template)) && (
+          <div style={{
+            padding: '8px 12px', background: '#fff7ed', borderBottom: '1.5px solid #fed7aa',
+            display: 'flex', gap: 12, alignItems: 'center', overflowX: 'auto',
+          }}>
+            {NEEDS_COUNT(template) && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}>
+                <span style={{ fontWeight: 700 }}>כמות:</span>
+                <button onClick={() => setCfg((c) => ({ ...c, count: Math.max(2, c.count - 1) }))}
+                  style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>−</button>
+                <span style={{ fontWeight: 800, minWidth: 24, textAlign: 'center' }}>{cfg.count}</span>
+                <button onClick={() => setCfg((c) => ({ ...c, count: Math.min(20, c.count + 1) }))}
+                  style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>+</button>
+              </label>
+            )}
+            {NEEDS_GRID(template) && (
+              <>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}>
+                  <span style={{ fontWeight: 700 }}>שורות:</span>
+                  <button onClick={() => setCfg((c) => ({ ...c, rows: Math.max(1, c.rows - 1) }))}
+                    style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>−</button>
+                  <span style={{ fontWeight: 800, minWidth: 24, textAlign: 'center' }}>{cfg.rows}</span>
+                  <button onClick={() => setCfg((c) => ({ ...c, rows: Math.min(12, c.rows + 1) }))}
+                    style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>+</button>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0 }}>
+                  <span style={{ fontWeight: 700 }}>טורים:</span>
+                  <button onClick={() => setCfg((c) => ({ ...c, cols: Math.max(1, c.cols - 1) }))}
+                    style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>−</button>
+                  <span style={{ fontWeight: 800, minWidth: 24, textAlign: 'center' }}>{cfg.cols}</span>
+                  <button onClick={() => setCfg((c) => ({ ...c, cols: Math.min(12, c.cols + 1) }))}
+                    style={{ width: 30, height: 30, fontWeight: 800, fontSize: 16, background: 'var(--bg2)', border: '1.5px solid var(--bd2)', borderRadius: 6, cursor: 'pointer', fontFamily: 'inherit' }}>+</button>
+                </label>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* קנבס מסוקל */}
+        <div style={{ overflowX: 'hidden' }}>
+          <Stage
+            ref={stageRef}
+            width={stageW} height={stageH}
+            scaleX={mobileScale} scaleY={mobileScale}
+            onClick={onStageClick} onTap={onStageClick}
+            style={{ background: '#fff', display: 'block' }}
+          >
+            <Layer listening={false}>{renderGrid()}</Layer>
+            <Layer>
+              {classroom.walls.map(renderWall)}
+              {classroom.fixedElements.map(renderTeacherDesk)}
+              {classroom.desks.map(renderDesk)}
+              {renderSnapGuides()}
+            </Layer>
+          </Stage>
+        </div>
+
+        {/* פס פעולות תחתון */}
+        <div style={{
+          padding: '8px 12px', display: 'flex', gap: 8, background: 'var(--bg2)',
+          borderTop: '1px solid var(--bd)', overflowX: 'auto',
+        }}>
+          <button onClick={undo} disabled={historyDepth === 0}
+            style={{ flex: 1, padding: '10px 8px', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+              background: 'var(--bg)', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)',
+              cursor: historyDepth > 0 ? 'pointer' : 'not-allowed', opacity: historyDepth > 0 ? 1 : 0.5, whiteSpace: 'nowrap' }}>
+            ↶ ביטול
+          </button>
+          <button
+            onClick={() => addDesk(
+              { position: { x: Math.round(classroom.width / 2), y: Math.round(classroom.height / 2) }, rotation: 0, seatCount: 2 },
+              [{ side: 'left', autoZones: [] }, { side: 'right', autoZones: [] }]
+            )}
+            style={{ flex: 1, padding: '10px 8px', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+              background: 'var(--bg)', border: '1.5px solid var(--bd2)', borderRadius: 'var(--rs)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+            + שולחן זוג
+          </button>
+          <button
+            onClick={() => { if (selectedIds.size > 0) { selectedIds.forEach((id) => removeDesk(id)); setSelectedIds(new Set()); } }}
+            disabled={selectedIds.size === 0}
+            style={{ flex: 1, padding: '10px 8px', fontWeight: 700, fontSize: 13, fontFamily: 'inherit',
+              background: selectedIds.size > 0 ? '#fef2f2' : 'var(--bg)',
+              color: selectedIds.size > 0 ? 'var(--rd)' : 'var(--ink3)',
+              border: `1.5px solid ${selectedIds.size > 0 ? '#fecaca' : 'var(--bd)'}`,
+              borderRadius: 'var(--rs)', cursor: selectedIds.size > 0 ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap' }}>
+            🗑 מחק
+          </button>
+        </div>
+
+        {/* ספירת שולחנות */}
+        <div style={{ padding: '6px 14px', fontSize: 12, color: 'var(--ink3)', background: 'var(--bg2)' }}>
+          {classroom.desks.length} שולחנות · {classroom.seats.length} מושבים
+          {selectedIds.size > 0 && <span style={{ color: 'var(--ac)', fontWeight: 700 }}> · {selectedIds.size} נבחרו</span>}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>

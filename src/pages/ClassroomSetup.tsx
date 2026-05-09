@@ -4,12 +4,15 @@ import { useClassroomStore } from '../store/classroomStore';
 import RoomEditor from '../components/canvas/RoomEditor';
 import DeskLayoutEditor from '../components/canvas/DeskLayoutEditor';
 import ClassroomNav from '../components/canvas/ClassroomNav';
+import MobileClassroomView from '../components/mobile/MobileClassroomView';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export default function ClassroomSetup() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const classroom = useClassroomStore((s) => (id ? s.classrooms[id] : undefined));
   const setCurrent = useClassroomStore((s) => s.setCurrent);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     if (id) setCurrent(id);
@@ -31,6 +34,10 @@ export default function ClassroomSetup() {
         </button>
       </div>
     );
+  }
+
+  if (isMobile) {
+    return <MobileClassroomView classroomId={classroom.id} initialTab="room" />;
   }
 
   return (

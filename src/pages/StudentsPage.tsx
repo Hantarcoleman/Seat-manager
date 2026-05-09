@@ -3,12 +3,15 @@ import { useEffect } from 'react';
 import { useClassroomStore } from '../store/classroomStore';
 import StudentManager from '../components/students/StudentManager';
 import ClassroomNav from '../components/canvas/ClassroomNav';
+import MobileClassroomView from '../components/mobile/MobileClassroomView';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 export default function StudentsPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const classroom = useClassroomStore((s) => (id ? s.classrooms[id] : undefined));
   const setCurrent = useClassroomStore((s) => s.setCurrent);
+  const isMobile = useIsMobile();
 
   useEffect(() => { if (id) setCurrent(id); }, [id, setCurrent]);
 
@@ -23,6 +26,10 @@ export default function StudentsPage() {
         }}>חזרה לרשימת כיתות</button>
       </div>
     );
+  }
+
+  if (isMobile) {
+    return <MobileClassroomView classroomId={classroom.id} initialTab="students" />;
   }
 
   return (
