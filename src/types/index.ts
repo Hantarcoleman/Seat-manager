@@ -223,6 +223,7 @@ export interface GenerateArrangementOptions {
   candidates?: number;
   previousArrangement?: SeatingArrangement;
   seed?: number;
-  separateGenders?: boolean;  // נסה להפריד בנים/בנות בשולחנות זוגיים
+  separateGenders?: boolean;  // נסה לשבץ עם אותו מין
+  mixGenders?: boolean;       // נסה לצמד בן ובת באותו שולחן
   forbiddenGroups?: string[][];  // קבוצות תלמידים שאסור להושיב יחד
 }

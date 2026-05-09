@@ -8,7 +8,7 @@ export function validateAssignments(
   arr: SeatingArrangement,
   classroom: Classroom,
   students: Student[],
-  opts?: { separateGenders?: boolean; forbiddenGroups?: string[][] }
+  opts?: { separateGenders?: boolean; mixGenders?: boolean; forbiddenGroups?: string[][] }
 ): ArrangementWarning[] {
   const warnings: ArrangementWarning[] = [];
 
@@ -166,6 +166,13 @@ export function validateAssignments(
       warnings.push({
         type: 'soft',
         message: `⚡ ${a.name} ו-${b.name} יושבים יחד (בנים/בנות מעורבים)`,
+        studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
+      });
+    }
+    if (opts?.mixGenders && a.gender && b.gender && a.gender === b.gender) {
+      warnings.push({
+        type: 'soft',
+        message: `⚡ ${a.name} ו-${b.name} יושבים יחד (שני ${a.gender === 'm' ? 'בנים' : 'בנות'})`,
         studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
       });
     }

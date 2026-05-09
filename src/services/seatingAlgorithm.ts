@@ -54,7 +54,7 @@ export function generateSeatingArrangement(
   for (let i = 0; i < numCandidates; i++) {
     const rng = makeRng(baseSeed + i * 7919);
     const candidate = buildCandidate(enrichedClassroom, students, rng, options);
-    const warnings = validateAssignments(candidate, enrichedClassroom, students, { separateGenders: options.separateGenders, forbiddenGroups: options.forbiddenGroups });
+    const warnings = validateAssignments(candidate, enrichedClassroom, students, { separateGenders: options.separateGenders, mixGenders: options.mixGenders, forbiddenGroups: options.forbiddenGroups });
     const score = scoreArrangement(warnings);
 
     if (score > bestScore) {
@@ -137,6 +137,21 @@ function buildCandidate(
     while (backIdx < backSeats.length && usedSeatIds.has(backSeats[backIdx].id)) backIdx++;
     const seat = backSeats[backIdx] ?? freeSeat((s) => !zones(s).has('front_row'));
     if (seat) assign(seat.id, stu.id);
+  }
+
+  // ── שלב 2ב: can_focus_back → עדיף שורה אחורית (לא חובה) ──
+  const canFocusBack = shuffle(
+    students.filter((s) => s.tags.includes('can_focus_back') && !usedStudentIds.has(s.id)),
+    rng
+  );
+  const backOnlySeats = shuffle(
+    seats.filter((s) => !usedSeatIds.has(s.id) && zones(s).has('back_row')),
+    rng
+  );
+  let cbIdx = 0;
+  for (const stu of canFocusBack) {
+    while (cbIdx < backOnlySeats.length && usedSeatIds.has(backOnlySeats[cbIdx].id)) cbIdx++;
+    if (backOnlySeats[cbIdx]) assign(backOnlySeats[cbIdx].id, stu.id);
   }
 
   // ── שלב 3: "כדאי שישב לבד" → מושבים solo ──
@@ -246,14 +261,24 @@ function buildCandidate(
         stu.tags.includes('distractible') &&
         (zones(seat).has('near_window') || zones(seat).has('near_door'));
 
-      // הפרדת מגדרים: מעדיף לא לצרף בן ובת באותו שולחן
+      // הפרדת/ערבוב מגדרים
       const deskOccs = deskOccupants.get(seat.deskId) ?? [];
-      const genderConflict =
-        !!(options.separateGenders && stu.gender) &&
-        deskOccs.some((oid) => {
-          const ostu = students.find((s) => s.id === oid);
-          return ostu?.gender && ostu.gender !== stu.gender;
-        });
+      const genderConflict = (() => {
+        if (!stu.gender) return false;
+        if (options.separateGenders) {
+          return deskOccs.some((oid) => {
+            const ostu = students.find((s) => s.id === oid);
+            return ostu?.gender && ostu.gender !== stu.gender;
+          });
+        }
+        if (options.mixGenders) {
+          return deskOccs.some((oid) => {
+            const ostu = students.find((s) => s.id === oid);
+            return ostu?.gender && ostu.gender === stu.gender;
+          });
+        }
+        return false;
+      })();
 
       if (!conflict && !distractConflict && !genderConflict) { chosen = seat; break; }
       if (!conflict && !distractConflict && !chosen) chosen = seat; // fallback: ללא conflict, אבל עם הסחה

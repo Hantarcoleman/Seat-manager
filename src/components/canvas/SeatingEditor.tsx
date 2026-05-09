@@ -50,7 +50,7 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [quickSearch, setQuickSearch] = useState('');
   const [editingNameId, setEditingNameId] = useState<string | null>(null);
   const [editingNameValue, setEditingNameValue] = useState('');
-  const [separateGenders, setSeparateGenders] = useState(false);
+  const [genderMode, setGenderMode] = useState<'mix' | 'same' | null>(null);
   const [aiProposals, setAiProposals] = useState<SeatingArrangement[]>([]);
   const [previewIdx, setPreviewIdx] = useState<number | null>(null);
   const [search, setSearch] = useState('');
@@ -139,13 +139,16 @@ export default function SeatingEditor({ classroomId }: Props) {
       return aiProposals[previewIdx].warnings;
     }
     if (!working) return [];
-    return validateAssignments(working, classroom, students, { separateGenders, forbiddenGroups });
+    return validateAssignments(working, classroom, students, { separateGenders: genderMode === 'same', mixGenders: genderMode === 'mix', forbiddenGroups });
   }, [previewIdx, aiProposals, working, classroom, students, separateGenders, forbiddenGroups]);
 
   const displayScore = useMemo(() => {
     if (previewIdx !== null && aiProposals[previewIdx]) return aiProposals[previewIdx].score;
     return scoreArrangement(displayWarnings);
   }, [previewIdx, aiProposals, displayWarnings]);
+
+  const boyCount = useMemo(() => students.filter((s) => s.gender === 'm').length, [students]);
+  const girlCount = useMemo(() => students.filter((s) => s.gender === 'f').length, [students]);
 
   const flaggedSeatIds = useMemo(() => {
     const s = new Set<string>();
@@ -397,10 +400,11 @@ export default function SeatingEditor({ classroomId }: Props) {
 
         const proposals = [0, 12345, 67890].map((offset) => {
           const raw = generateSeatingArrangement(freeClassroom, freeStudents, {
-            candidates: 60, seed: baseSeed + offset, separateGenders, forbiddenGroups,
+            candidates: 60, seed: baseSeed + offset,
+            separateGenders: genderMode === 'same', mixGenders: genderMode === 'mix', forbiddenGroups,
           });
           const merged = { ...raw, assignments: [...pinnedAssignments, ...raw.assignments] };
-          const warnings = validateAssignments(merged, classroom, students, { separateGenders, forbiddenGroups });
+          const warnings = validateAssignments(merged, classroom, students, { separateGenders: genderMode === 'same', mixGenders: genderMode === 'mix', forbiddenGroups });
           return { ...merged, warnings, score: scoreArrangement(warnings) };
         });
 
@@ -493,7 +497,7 @@ export default function SeatingEditor({ classroomId }: Props) {
 
   const renderSeat = (seat: Seat) => {
     const isSolo = seat.side === 'solo';
-    const r = isSolo ? 42 : 36;
+    const r = isSolo ? 44 : 43;
     const dx = isSolo ? 0 : (seat.side === 'left' ? -42 : 42);
 
     const studentId = seatToStudentId.get(seat.id);
@@ -599,23 +603,33 @@ export default function SeatingEditor({ classroomId }: Props) {
     <div>
       {/* פס סטטיסטיקה */}
       <div style={{
-        display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 12,
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        flexWrap: 'wrap', gap: 10, marginBottom: 12,
         background: 'var(--bg2)', border: '1px solid var(--bd)',
         borderRadius: 'var(--rs)', padding: '8px 14px',
       }}>
-        {[
-          { label: 'מקומות פנויים', value: availableSeats, color: availableSeats > 0 ? '#0284c7' : '#16a34a' },
-          { label: 'ממתינים לשיבוץ', value: unassigned.length, color: unassigned.length > 0 ? '#ca8a04' : '#16a34a' },
-          { label: 'כדאי לבד', value: aloneCount, color: '#7c3aed' },
-          { label: 'נעוצים', value: pinnedStudentIds.length, color: '#7c3aed' },
-        ].map((stat) => (
-          <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ background: stat.color, color: '#fff', borderRadius: 10, padding: '2px 9px', fontWeight: 800, fontSize: 13 }}>
-              {stat.value}
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--ink2)' }}>{stat.label}</span>
-          </div>
-        ))}
+        {/* ימין — סטטיסטיקות שיבוץ */}
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          {[
+            { label: 'מקומות פנויים', value: availableSeats, color: availableSeats > 0 ? '#0284c7' : '#16a34a' },
+            { label: 'ממתינים לשיבוץ', value: unassigned.length, color: unassigned.length > 0 ? '#ca8a04' : '#16a34a' },
+            { label: 'כדאי לבד', value: aloneCount, color: '#7c3aed' },
+            { label: 'נעוצים', value: pinnedStudentIds.length, color: '#7c3aed' },
+          ].map((stat) => (
+            <div key={stat.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ background: stat.color, color: '#fff', borderRadius: 10, padding: '2px 9px', fontWeight: 800, fontSize: 13 }}>
+                {stat.value}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--ink2)' }}>{stat.label}</span>
+            </div>
+          ))}
+        </div>
+        {/* שמאל — ספירת תלמידים */}
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center', borderRight: '1px solid var(--bd)', paddingRight: 14 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{students.length} תלמידים</span>
+          <span style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 700 }}>👦 {boyCount}</span>
+          <span style={{ fontSize: 13, color: '#be185d', fontWeight: 700 }}>👧 {girlCount}</span>
+        </div>
       </div>
 
       {/* באנר תצוגה מקדימה */}
@@ -713,15 +727,32 @@ export default function SeatingEditor({ classroomId }: Props) {
             >
               🗑 מחק חוץ מנעוצים
             </button>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', userSelect: 'none' }}>
-              <input
-                type="checkbox"
-                checked={separateGenders}
-                onChange={(e) => setSeparateGenders(e.target.checked)}
-                style={{ width: 15, height: 15 }}
-              />
-              הפרד בנים/בנות
-            </label>
+            <button
+              onClick={() => setGenderMode(genderMode === 'mix' ? null : 'mix')}
+              style={{
+                background: genderMode === 'mix' ? '#0284c7' : 'var(--bg2)',
+                color: genderMode === 'mix' ? '#fff' : 'var(--ink)',
+                border: `1.5px solid ${genderMode === 'mix' ? '#0284c7' : 'var(--bd)'}`,
+                borderRadius: 'var(--rs)', padding: '8px 12px', fontWeight: 700, fontSize: 12,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+              title="שבץ בנים ובנות באותו שולחן"
+            >
+              ⚤ הפרד בנים/בנות
+            </button>
+            <button
+              onClick={() => setGenderMode(genderMode === 'same' ? null : 'same')}
+              style={{
+                background: genderMode === 'same' ? '#7c3aed' : 'var(--bg2)',
+                color: genderMode === 'same' ? '#fff' : 'var(--ink)',
+                border: `1.5px solid ${genderMode === 'same' ? '#7c3aed' : 'var(--bd)'}`,
+                borderRadius: 'var(--rs)', padding: '8px 12px', fontWeight: 700, fontSize: 12,
+                cursor: 'pointer', fontFamily: 'inherit',
+              }}
+              title="שבץ בנים עם בנים ובנות עם בנות"
+            >
+              👥 אותו מין יחד
+            </button>
             <div style={{ marginRight: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
               <span style={{ fontSize: 13, color: 'var(--ink2)' }}>
                 <strong>{displayAssignments.length}</strong> משובצים · <strong>{unassigned.length}</strong> ממתינים
@@ -1299,7 +1330,7 @@ function calcLineFontSize(lines: string[], r: number): number {
   const byWidth  = Math.floor(availW / (maxLen * 0.55));
   // שתי שורות + גאפ צריכות להיכנס לקוטר האנכי (r * 2 * 0.75)
   const byHeight = lines.length > 1 ? Math.floor((r * 1.5 - 2) / 2) : Math.floor(r * 0.72);
-  return Math.max(9, Math.min(byWidth, byHeight, 19));
+  return Math.max(9, Math.min(byWidth, byHeight, 23));
 }
 
 function HistoryItem({ name, date, onRestore, cloud }: {
