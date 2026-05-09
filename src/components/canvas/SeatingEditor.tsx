@@ -12,7 +12,10 @@ import { saveArrangementHistory, loadHistory } from '../../services/cloudSyncSer
 import { isSupabaseEnabled } from '../../services/supabaseClient';
 import { getPlacementExplanation } from '../../services/scoringService';
 import type { Wall, FixedElement, Desk, Seat, Student, ArrangementWarning, SeatingArrangement } from '../../types';
+import { TAG_DEFS, getConflictingTag } from '../../types';
+import type { StudentTag } from '../../types';
 import DeskGridControls from './DeskGridControls';
+import StudentManager from '../students/StudentManager';
 
 const WALL_STYLES: Record<string, { color: string; width: number; dash?: number[] }> = {
   blank:        { color: '#1c1917', width: 6 },
@@ -29,6 +32,9 @@ export default function SeatingEditor({ classroomId }: Props) {
   const classroom = useClassroomStore((s) => s.classrooms[classroomId]);
   const students = useStudentsStore((s) => s.byClassroom[classroomId] ?? []);
   const updateStudent = useStudentsStore((s) => s.update);
+  const forbiddenGroups = useStudentsStore((s) => s.forbiddenGroups[classroomId] ?? []);
+  const addForbiddenGroup = useStudentsStore((s) => s.addForbiddenGroup);
+  const removeForbiddenGroup = useStudentsStore((s) => s.removeForbiddenGroup);
   const working = useArrangementStore((s) => s.workingByClassroom[classroomId]);
   const setWorking = useArrangementStore((s) => s.setWorking);
   const updateAssignments = useArrangementStore((s) => s.updateAssignments);
@@ -51,6 +57,14 @@ export default function SeatingEditor({ classroomId }: Props) {
   const [generating, setGenerating] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [cloudHistory, setCloudHistory] = useState<import('../../services/cloudSyncService').HistoryEntry[]>([]);
+  // שילובים אסורים — מצב פאנל
+  const [addingGroup, setAddingGroup] = useState(false);
+  const [newGroupIds, setNewGroupIds] = useState<string[]>([]);
+  const [groupSearch, setGroupSearch] = useState('');
+  // פאנל תלמידים
+  const [showStudents, setShowStudents] = useState(false);
+  // סלקטור פאנל ימני
+  const [rightPanel, setRightPanel] = useState<'waiting' | 'forbidden' | 'students'>('waiting');
   const stageRef = useRef<Konva.Stage>(null);
 
   const user = useAuthStore((s) => s.user);
@@ -125,8 +139,8 @@ export default function SeatingEditor({ classroomId }: Props) {
       return aiProposals[previewIdx].warnings;
     }
     if (!working) return [];
-    return validateAssignments(working, classroom, students, { separateGenders });
-  }, [previewIdx, aiProposals, working, classroom, students, separateGenders]);
+    return validateAssignments(working, classroom, students, { separateGenders, forbiddenGroups });
+  }, [previewIdx, aiProposals, working, classroom, students, separateGenders, forbiddenGroups]);
 
   const displayScore = useMemo(() => {
     if (previewIdx !== null && aiProposals[previewIdx]) return aiProposals[previewIdx].score;
@@ -383,10 +397,10 @@ export default function SeatingEditor({ classroomId }: Props) {
 
         const proposals = [0, 12345, 67890].map((offset) => {
           const raw = generateSeatingArrangement(freeClassroom, freeStudents, {
-            candidates: 60, seed: baseSeed + offset, separateGenders,
+            candidates: 60, seed: baseSeed + offset, separateGenders, forbiddenGroups,
           });
           const merged = { ...raw, assignments: [...pinnedAssignments, ...raw.assignments] };
-          const warnings = validateAssignments(merged, classroom, students, { separateGenders });
+          const warnings = validateAssignments(merged, classroom, students, { separateGenders, forbiddenGroups });
           return { ...merged, warnings, score: scoreArrangement(warnings) };
         });
 
@@ -628,7 +642,7 @@ export default function SeatingEditor({ classroomId }: Props) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, alignItems: 'start' }}>
         {/* ── עמודה שמאלית: קנבס ── */}
         <div>
           {/* פעולות עליונות */}
@@ -822,266 +836,447 @@ export default function SeatingEditor({ classroomId }: Props) {
         </div>
 
         {/* ── עמודה ימנית ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {/* אזור המתנה — מיושר עם הקיר האחורי (תחתית הקנבס) */}
-          <div
-            onClick={onParkingDrop}
-            style={{
-              marginTop: 90,
-              background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
-              border: pickedStudentId && studentToSeatId.has(pickedStudentId)
-                ? '2px dashed var(--ac)' : '1px solid var(--bd)',
-              borderRadius: 'var(--r)', padding: 12, boxShadow: 'var(--sh)',
-              cursor: pickedStudentId && studentToSeatId.has(pickedStudentId) ? 'pointer' : 'default',
-            }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>
-              ⏳ אזור המתנה ({unassigned.length})
-            </div>
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => { e.stopPropagation(); setSearch(e.target.value); }}
-              onClick={(e) => e.stopPropagation()}
-              placeholder="🔍 חיפוש..."
-              style={{
-                width: '100%', padding: '6px 10px', fontSize: 13,
-                border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
-                fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 8,
-              }}
-            />
-            <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {filteredUnassigned.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 12 }}>
-                  {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0, marginTop: 90 }}>
+          {/* טאבים */}
+          <div style={{
+            display: 'flex', borderBottom: '2px solid var(--bd)', marginBottom: 12,
+            background: 'var(--bg2)', borderRadius: 'var(--rs) var(--rs) 0 0',
+          }}>
+            {(['waiting', 'forbidden', 'students'] as const).map((panel) => {
+              const labels: Record<string, string> = {
+                waiting: '⏳ שיבוץ',
+                forbidden: `📛 שילובים${forbiddenGroups.length ? ` (${forbiddenGroups.length})` : ''}`,
+                students: `👥 תלמידים (${students.length})`,
+              };
+              const isActive = rightPanel === panel;
+              return (
+                <button
+                  key={panel}
+                  onClick={() => setRightPanel(panel)}
+                  style={{
+                    flex: 1, padding: '8px 4px', fontSize: 11, fontWeight: isActive ? 800 : 600,
+                    background: isActive ? 'var(--ac)' : 'transparent',
+                    color: isActive ? '#fff' : 'var(--ink2)',
+                    border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                    borderRadius: isActive ? 'var(--rs) var(--rs) 0 0' : 0,
+                  }}
+                >
+                  {labels[panel]}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── פאנל שיבוץ ── */}
+          {rightPanel === 'waiting' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {/* אזור המתנה */}
+              <div
+                onClick={onParkingDrop}
+                style={{
+                  background: pickedStudentId && studentToSeatId.has(pickedStudentId) ? '#fff7ed' : 'var(--bg2)',
+                  border: pickedStudentId && studentToSeatId.has(pickedStudentId)
+                    ? '2px dashed var(--ac)' : '1px solid var(--bd)',
+                  borderRadius: 'var(--r)', padding: 12, boxShadow: 'var(--sh)',
+                  cursor: pickedStudentId && studentToSeatId.has(pickedStudentId) ? 'pointer' : 'default',
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 6 }}>
+                  ⏳ אזור המתנה ({unassigned.length})
                 </div>
-              ) : filteredUnassigned.map((s) => {
-                const isP = pickedStudentId === s.id;
-                const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
-                const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
-                const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
-                const isEditing = editingNameId === s.id;
-                return (
-                  <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                    {isEditing ? (
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => { e.stopPropagation(); setSearch(e.target.value); }}
+                  onClick={(e) => e.stopPropagation()}
+                  placeholder="🔍 חיפוש..."
+                  style={{
+                    width: '100%', padding: '6px 10px', fontSize: 13,
+                    border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
+                    fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 8,
+                  }}
+                />
+                <div style={{ maxHeight: 300, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {filteredUnassigned.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 12 }}>
+                      {unassigned.length === 0 ? '✓ כולם משובצים!' : 'אין תוצאות'}
+                    </div>
+                  ) : filteredUnassigned.map((s) => {
+                    const isP = pickedStudentId === s.id;
+                    const bg = s.gender === 'm' ? '#eff6ff' : s.gender === 'f' ? '#fdf2f8' : 'var(--bg)';
+                    const color = s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)';
+                    const border = s.gender === 'm' ? '#bfdbfe' : s.gender === 'f' ? '#fbcfe8' : 'var(--bd)';
+                    const isEditing = editingNameId === s.id;
+                    return (
+                      <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editingNameValue}
+                            onChange={(e) => setEditingNameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') saveEditName();
+                              if (e.key === 'Escape') setEditingNameId(null);
+                            }}
+                            onBlur={saveEditName}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              flex: 1, padding: '5px 10px', fontSize: 13, fontWeight: 700,
+                              border: `1.5px solid ${border}`, borderRadius: 'var(--rs)',
+                              fontFamily: 'inherit', direction: 'rtl', background: bg, color,
+                            }}
+                          />
+                        ) : (
+                          <button
+                            draggable
+                            onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
+                            onDragEnd={() => setDraggedStudentId(null)}
+                            onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
+                            style={{
+                              flex: 1, background: isP ? '#fff7ed' : bg,
+                              color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
+                              borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
+                              cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
+                            }}
+                          >
+                            {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                          </button>
+                        )}
+                        {!isEditing && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setEditingNameId(s.id); setEditingNameValue(s.name); }}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, opacity: 0.5, padding: '0 2px', lineHeight: 1 }}
+                            title="ערוך שם"
+                          >✏️</button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* הצעות AI */}
+              {aiProposals.length > 0 && (
+                <div style={{
+                  background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+                  padding: 12, boxShadow: 'var(--sh)',
+                }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>🤖 הצעות AI — בחר אחת</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {aiProposals.map((p, i) => {
+                      const hard = p.warnings.filter((w) => w.type === 'hard').length;
+                      const soft = p.warnings.filter((w) => w.type === 'soft').length;
+                      const isActive = previewIdx === i;
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setPreviewIdx(i)}
+                          style={{
+                            background: isActive ? '#fff7ed' : 'var(--bg)',
+                            border: `1.5px solid ${isActive ? 'var(--ac)' : 'var(--bd)'}`,
+                            borderRadius: 'var(--rs)', padding: '8px 10px', cursor: 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 8,
+                          }}
+                        >
+                          <span style={{ fontWeight: 800, fontSize: 13 }}>הצעה {i + 1}</span>
+                          <span style={{
+                            background: p.score >= 80 ? '#16a34a' : p.score >= 60 ? '#ca8a04' : '#dc2626',
+                            color: '#fff', fontSize: 12, fontWeight: 800, padding: '2px 8px', borderRadius: 10,
+                          }}>{p.score}</span>
+                          <span style={{ fontSize: 11, color: 'var(--ink3)', flex: 1 }}>
+                            {hard} חמורות · {soft} מומלצות
+                          </span>
+                          {isActive && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); applyProposal(i); }}
+                              style={{
+                                background: 'var(--ac)', color: '#fff', border: 'none',
+                                borderRadius: 'var(--rs)', padding: '4px 10px', fontSize: 11, fontWeight: 700,
+                                cursor: 'pointer', fontFamily: 'inherit',
+                              }}
+                            >
+                              החל
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* הסבר שיבוץ */}
+              {placementExplanation && (
+                <div style={{
+                  background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+                  padding: 12, boxShadow: 'var(--sh)',
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    🔍{' '}
+                    {editingNameId === explanationStudentId ? (
                       <input
                         autoFocus
                         value={editingNameValue}
                         onChange={(e) => setEditingNameValue(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') saveEditName();
-                          if (e.key === 'Escape') setEditingNameId(null);
-                        }}
+                        onKeyDown={(e) => { if (e.key === 'Enter') saveEditName(); if (e.key === 'Escape') setEditingNameId(null); }}
                         onBlur={saveEditName}
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          flex: 1, padding: '5px 10px', fontSize: 13, fontWeight: 700,
-                          border: `1.5px solid ${border}`, borderRadius: 'var(--rs)',
-                          fontFamily: 'inherit', direction: 'rtl', background: bg, color,
-                        }}
+                        style={{ flex: 1, padding: '2px 6px', fontSize: 13, borderRadius: 4, border: '1px solid var(--bd)', fontFamily: 'inherit', direction: 'rtl' }}
                       />
                     ) : (
-                      <button
-                        draggable
-                        onDragStart={(e) => { e.dataTransfer.setData('text/plain', s.id); setDraggedStudentId(s.id); }}
-                        onDragEnd={() => setDraggedStudentId(null)}
-                        onClick={(e) => { e.stopPropagation(); onParkingStudentClick(s.id); }}
-                        style={{
-                          flex: 1, background: isP ? '#fff7ed' : bg,
-                          color, border: isP ? '2px solid var(--ac)' : `1.5px solid ${border}`,
-                          borderRadius: 'var(--rs)', padding: '6px 10px', fontSize: 13, fontWeight: 700,
-                          cursor: 'grab', fontFamily: 'inherit', textAlign: 'right',
-                        }}
-                      >
-                        {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
-                      </button>
-                    )}
-                    {!isEditing && (
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEditingNameId(s.id); setEditingNameValue(s.name); }}
-                        style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, opacity: 0.5, padding: '0 2px', lineHeight: 1 }}
-                        title="ערוך שם"
-                      >✏️</button>
+                      <>
+                        <span>{students.find((s) => s.id === explanationStudentId)?.name ?? ''}</span>
+                        <button
+                          onClick={() => { const stu = students.find((s) => s.id === explanationStudentId); if (stu) { setEditingNameId(stu.id); setEditingNameValue(stu.name); } }}
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, opacity: 0.5, padding: 0 }}
+                          title="ערוך שם"
+                        >✏️</button>
+                      </>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* הצעות AI */}
-          {aiProposals.length > 0 && (
-            <div style={{
-              background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
-              padding: 12, boxShadow: 'var(--sh)',
-            }}>
-              <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>🤖 הצעות AI — בחר אחת</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {aiProposals.map((p, i) => {
-                  const hard = p.warnings.filter((w) => w.type === 'hard').length;
-                  const soft = p.warnings.filter((w) => w.type === 'soft').length;
-                  const isActive = previewIdx === i;
-                  return (
-                    <div
-                      key={i}
-                      onClick={() => setPreviewIdx(i)}
-                      style={{
-                        background: isActive ? '#fff7ed' : 'var(--bg)',
-                        border: `1.5px solid ${isActive ? 'var(--ac)' : 'var(--bd)'}`,
-                        borderRadius: 'var(--rs)', padding: '8px 10px', cursor: 'pointer',
-                        display: 'flex', alignItems: 'center', gap: 8,
-                      }}
-                    >
-                      <span style={{ fontWeight: 800, fontSize: 13 }}>הצעה {i + 1}</span>
-                      <span style={{
-                        background: p.score >= 80 ? '#16a34a' : p.score >= 60 ? '#ca8a04' : '#dc2626',
-                        color: '#fff', fontSize: 12, fontWeight: 800, padding: '2px 8px', borderRadius: 10,
-                      }}>{p.score}</span>
-                      <span style={{ fontSize: 11, color: 'var(--ink3)', flex: 1 }}>
-                        {hard} חמורות · {soft} מומלצות
-                      </span>
-                      {isActive && (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); applyProposal(i); }}
-                          style={{
-                            background: 'var(--ac)', color: '#fff', border: 'none',
-                            borderRadius: 'var(--rs)', padding: '4px 10px', fontSize: 11, fontWeight: 700,
-                            cursor: 'pointer', fontFamily: 'inherit',
-                          }}
-                        >
-                          החל
-                        </button>
-                      )}
+                  {placementExplanation.seatId === null ? (
+                    <div style={{ fontSize: 12, color: 'var(--ink3)' }}>⏳ ממתין לשיבוץ</div>
+                  ) : placementExplanation.reasons.length === 0 ? (
+                    <div style={{ fontSize: 12, color: 'var(--ink3)' }}>אין אילוצים מיוחדים</div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {placementExplanation.reasons.map((r, i) => (
+                        <div key={i} style={{
+                          fontSize: 12,
+                          color: r.satisfied ? '#166534' : '#991b1b',
+                          background: r.satisfied ? '#f0fdf4' : '#fff1f2',
+                          borderRadius: 6, padding: '4px 8px',
+                        }}>
+                          {r.tag}: {r.note}
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
+                  )}
+                </div>
+              )}
+
+              {/* אזהרות */}
+              <div style={{
+                background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+                padding: 12, boxShadow: 'var(--sh)',
+              }}>
+                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>
+                  ⚠ התראות ({displayWarnings.length})
+                </div>
+                {displayWarnings.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--gn)', fontWeight: 600 }}>✓ אין התראות. הסידור מאוזן.</div>
+                ) : (
+                  <div style={{ maxHeight: 200, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {displayWarnings.map((w, i) => (
+                      <div key={i} style={{
+                        background: w.type === 'hard' ? '#fef2f2' : '#fffbeb',
+                        border: `1px solid ${w.type === 'hard' ? '#fecaca' : '#fde68a'}`,
+                        borderRadius: 'var(--rs)', padding: '8px 10px',
+                        fontSize: 12, color: w.type === 'hard' ? '#991b1b' : '#92400e',
+                      }}>
+                        {w.message}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* היסטוריה */}
+              <div style={{
+                background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
+                padding: 12, boxShadow: 'var(--sh)',
+              }}>
+                <button
+                  onClick={() => setShowHistory((v) => !v)}
+                  style={{
+                    width: '100%', background: 'none', border: 'none', padding: 0,
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  <span style={{ fontSize: 14, fontWeight: 800 }}>📅 היסטוריה ({localHistory.length})</span>
+                  <span style={{ fontSize: 12, color: 'var(--ink3)' }}>{showHistory ? '▲' : '▼'}</span>
+                </button>
+                {showHistory && (
+                  <div style={{ marginTop: 10 }}>
+                    {localHistory.length === 0 && cloudHistory.length === 0 ? (
+                      <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 8 }}>
+                        אין סידורים שמורים עדיין
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflow: 'auto' }}>
+                        {localHistory.map((arr) => (
+                          <HistoryItem
+                            key={arr.id}
+                            name={arr.name}
+                            date={arr.createdAt}
+                            onRestore={() => { restore(arr.id); setShowHistory(false); setPickedStudentId(null); }}
+                          />
+                        ))}
+                        {cloudHistory
+                          .filter((ch) => !localHistory.find((lh) => lh.id === ch.id))
+                          .map((ch) => (
+                            <HistoryItem
+                              key={ch.id}
+                              name={ch.name || ch.classroomName}
+                              date={ch.createdAt}
+                              cloud
+                              onRestore={() => restoreFromHistory(ch.data)}
+                            />
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* הסבר שיבוץ */}
-          {placementExplanation && (
-            <div style={{
-              background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
-              padding: 12, boxShadow: 'var(--sh)',
-            }}>
-              <div style={{ fontSize: 13, fontWeight: 800, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
-                🔍{' '}
-                {editingNameId === explanationStudentId ? (
-                  <input
-                    autoFocus
-                    value={editingNameValue}
-                    onChange={(e) => setEditingNameValue(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') saveEditName(); if (e.key === 'Escape') setEditingNameId(null); }}
-                    onBlur={saveEditName}
-                    style={{ flex: 1, padding: '2px 6px', fontSize: 13, borderRadius: 4, border: '1px solid var(--bd)', fontFamily: 'inherit', direction: 'rtl' }}
-                  />
-                ) : (
-                  <>
-                    <span>{students.find((s) => s.id === explanationStudentId)?.name ?? ''}</span>
-                    <button
-                      onClick={() => { const stu = students.find((s) => s.id === explanationStudentId); if (stu) { setEditingNameId(stu.id); setEditingNameValue(stu.name); } }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 12, opacity: 0.5, padding: 0 }}
-                      title="ערוך שם"
-                    >✏️</button>
-                  </>
-                )}
+          {/* ── פאנל שילובים אסורים ── */}
+          {rightPanel === 'forbidden' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div style={{ fontSize: 13, color: 'var(--ink2)', padding: '4px 0' }}>
+                הוסף קבוצות של תלמידים שלא יכולים לשבת יחד באותו שולחן. כל שני תלמידים מאותה קבוצה לא יושבו ביחד.
               </div>
-              {placementExplanation.seatId === null ? (
-                <div style={{ fontSize: 12, color: 'var(--ink3)' }}>⏳ ממתין לשיבוץ</div>
-              ) : placementExplanation.reasons.length === 0 ? (
-                <div style={{ fontSize: 12, color: 'var(--ink3)' }}>אין אילוצים מיוחדים</div>
+
+              {/* קבוצות קיימות */}
+              {forbiddenGroups.length === 0 ? (
+                <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 16,
+                  border: '1px dashed var(--bd)', borderRadius: 'var(--rs)' }}>
+                  אין שילובים אסורים עדיין
+                </div>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {placementExplanation.reasons.map((r, i) => (
-                    <div key={i} style={{
-                      fontSize: 12,
-                      color: r.satisfied ? '#166534' : '#991b1b',
-                      background: r.satisfied ? '#f0fdf4' : '#fff1f2',
-                      borderRadius: 6, padding: '4px 8px',
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {forbiddenGroups.map((group, idx) => (
+                    <div key={idx} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 6,
+                      background: '#fef2f2', border: '1px solid #fecaca',
+                      borderRadius: 'var(--rs)', padding: '8px 10px',
                     }}>
-                      {r.tag}: {r.note}
+                      <div style={{ flex: 1, fontSize: 12, fontWeight: 700, color: '#991b1b', lineHeight: 1.6 }}>
+                        🚫 {group.map((id) => students.find((s) => s.id === id)?.name ?? id).join(' · ')}
+                      </div>
+                      <button
+                        onClick={() => removeForbiddenGroup(classroomId, idx)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          fontSize: 14, color: '#dc2626', padding: '0 4px', lineHeight: 1, flexShrink: 0,
+                        }}
+                        title="הסר שילוב"
+                      >✕</button>
                     </div>
                   ))}
                 </div>
               )}
+
+              {/* הוספת קבוצה חדשה */}
+              {addingGroup ? (
+                <div style={{
+                  background: 'var(--bg2)', border: '1.5px solid var(--ac)', borderRadius: 'var(--r)',
+                  padding: 10,
+                }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8, color: 'var(--ac)' }}>
+                    + קבוצה חדשה
+                  </div>
+                  {/* תלמידים שנבחרו */}
+                  {newGroupIds.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
+                      {newGroupIds.map((id) => {
+                        const s = students.find((x) => x.id === id);
+                        if (!s) return null;
+                        return (
+                          <span key={id} style={{
+                            background: '#fff7ed', border: '1.5px solid var(--ac)',
+                            borderRadius: 20, padding: '3px 10px', fontSize: 12, fontWeight: 700,
+                            display: 'flex', alignItems: 'center', gap: 4,
+                          }}>
+                            {s.name}
+                            <button
+                              onClick={() => setNewGroupIds(newGroupIds.filter((x) => x !== id))}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, padding: 0, lineHeight: 1, color: '#ea580c' }}
+                            >✕</button>
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <input
+                    autoFocus
+                    value={groupSearch}
+                    onChange={(e) => setGroupSearch(e.target.value)}
+                    placeholder="🔍 חפש תלמיד להוסיף..."
+                    style={{
+                      width: '100%', padding: '6px 10px', fontSize: 13,
+                      border: '1px solid var(--bd2)', borderRadius: 'var(--rs)',
+                      fontFamily: 'inherit', direction: 'rtl', boxSizing: 'border-box', marginBottom: 6,
+                    }}
+                  />
+                  <div style={{ maxHeight: 150, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 8 }}>
+                    {students
+                      .filter((s) => !newGroupIds.includes(s.id) && (!groupSearch.trim() || s.name.includes(groupSearch.trim())))
+                      .map((s) => (
+                        <button
+                          key={s.id}
+                          onClick={() => { setNewGroupIds([...newGroupIds, s.id]); setGroupSearch(''); }}
+                          style={{
+                            textAlign: 'right', background: 'var(--bg)', border: '1px solid var(--bd)',
+                            borderRadius: 'var(--rs)', padding: '5px 10px', fontSize: 13, fontWeight: 600,
+                            cursor: 'pointer', fontFamily: 'inherit',
+                            color: s.gender === 'm' ? '#1d4ed8' : s.gender === 'f' ? '#be185d' : 'var(--ink)',
+                          }}
+                        >
+                          {s.gender === 'f' ? '👧 ' : s.gender === 'm' ? '👦 ' : ''}{s.name}
+                        </button>
+                      ))}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      disabled={newGroupIds.length < 2}
+                      onClick={() => {
+                        if (newGroupIds.length >= 2) {
+                          addForbiddenGroup(classroomId, newGroupIds);
+                          setNewGroupIds([]);
+                          setGroupSearch('');
+                          setAddingGroup(false);
+                        }
+                      }}
+                      style={{
+                        flex: 1, background: newGroupIds.length >= 2 ? 'var(--ac)' : 'var(--bd)',
+                        color: '#fff', border: 'none', borderRadius: 'var(--rs)',
+                        padding: '7px 0', fontWeight: 800, fontSize: 13,
+                        cursor: newGroupIds.length >= 2 ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+                      }}
+                    >
+                      שמור קבוצה {newGroupIds.length >= 2 ? `(${newGroupIds.length})` : '— בחר 2+'}
+                    </button>
+                    <button
+                      onClick={() => { setAddingGroup(false); setNewGroupIds([]); setGroupSearch(''); }}
+                      style={{
+                        background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--rs)',
+                        padding: '7px 12px', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                      }}
+                    >ביטול</button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setAddingGroup(true)}
+                  style={{
+                    background: 'var(--ac)', color: '#fff', border: 'none', borderRadius: 'var(--rs)',
+                    padding: '9px 16px', fontWeight: 800, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+                  }}
+                >
+                  + הוסף שילוב אסור
+                </button>
+              )}
             </div>
           )}
 
-          {/* אזהרות */}
-          <div style={{
-            background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
-            padding: 12, boxShadow: 'var(--sh)',
-          }}>
-            <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 8 }}>
-              ⚠ התראות ({displayWarnings.length})
+          {/* ── פאנל תלמידים ── */}
+          {rightPanel === 'students' && (
+            <div style={{ minWidth: 0 }}>
+              <StudentManager classroomId={classroomId} />
             </div>
-            {displayWarnings.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--gn)', fontWeight: 600 }}>✓ אין התראות. הסידור מאוזן.</div>
-            ) : (
-              <div style={{ maxHeight: 200, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {displayWarnings.map((w, i) => (
-                  <div key={i} style={{
-                    background: w.type === 'hard' ? '#fef2f2' : '#fffbeb',
-                    border: `1px solid ${w.type === 'hard' ? '#fecaca' : '#fde68a'}`,
-                    borderRadius: 'var(--rs)', padding: '8px 10px',
-                    fontSize: 12, color: w.type === 'hard' ? '#991b1b' : '#92400e',
-                  }}>
-                    {w.message}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* היסטוריה */}
-          <div style={{
-            background: 'var(--bg2)', border: '1px solid var(--bd)', borderRadius: 'var(--r)',
-            padding: 12, boxShadow: 'var(--sh)',
-          }}>
-            <button
-              onClick={() => setShowHistory((v) => !v)}
-              style={{
-                width: '100%', background: 'none', border: 'none', padding: 0,
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                cursor: 'pointer', fontFamily: 'inherit',
-              }}
-            >
-              <span style={{ fontSize: 14, fontWeight: 800 }}>📅 היסטוריה ({localHistory.length})</span>
-              <span style={{ fontSize: 12, color: 'var(--ink3)' }}>{showHistory ? '▲' : '▼'}</span>
-            </button>
-            {showHistory && (
-              <div style={{ marginTop: 10 }}>
-                {localHistory.length === 0 && cloudHistory.length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--ink3)', textAlign: 'center', padding: 8 }}>
-                    אין סידורים שמורים עדיין
-                  </div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 260, overflow: 'auto' }}>
-                    {localHistory.map((arr) => (
-                      <HistoryItem
-                        key={arr.id}
-                        name={arr.name}
-                        date={arr.createdAt}
-                        onRestore={() => { restore(arr.id); setShowHistory(false); setPickedStudentId(null); }}
-                      />
-                    ))}
-                    {cloudHistory
-                      .filter((ch) => !localHistory.find((lh) => lh.id === ch.id))
-                      .map((ch) => (
-                        <HistoryItem
-                          key={ch.id}
-                          name={ch.name || ch.classroomName}
-                          date={ch.createdAt}
-                          cloud
-                          onRestore={() => restoreFromHistory(ch.data)}
-                        />
-                      ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          )}
         </div>
       </div>
     </div>

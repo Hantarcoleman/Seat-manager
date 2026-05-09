@@ -8,7 +8,7 @@ export function validateAssignments(
   arr: SeatingArrangement,
   classroom: Classroom,
   students: Student[],
-  opts?: { separateGenders?: boolean }
+  opts?: { separateGenders?: boolean; forbiddenGroups?: string[][] }
 ): ArrangementWarning[] {
   const warnings: ArrangementWarning[] = [];
 
@@ -122,6 +122,20 @@ export function validateAssignments(
         message: `🚫 ${a.name} ו-${b.name} יושבים יחד למרות סימון "לא מומלץ ליד"`,
         studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
       });
+    }
+
+    // שילובים אסורים — קבוצות שהמורה הגדיר
+    if (opts?.forbiddenGroups) {
+      for (const group of opts.forbiddenGroups) {
+        const gs = new Set(group);
+        if (gs.has(a.id) && gs.has(b.id)) {
+          warnings.push({
+            type: 'hard',
+            message: `🚫 ${a.name} ו-${b.name} אינם יכולים לשבת יחד (שילוב אסור)`,
+            studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
+          });
+        }
+      }
     }
 
     if (a.tags.includes('talkative') && b.tags.includes('talkative')) {

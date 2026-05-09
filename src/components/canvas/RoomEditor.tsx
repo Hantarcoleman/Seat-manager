@@ -202,6 +202,11 @@ export default function RoomEditor({ classroomId }: Props) {
   }, [drafting, draftingType, undo, redo, totalSelected, selectedWallIds, selectedFixedIds]);
 
   const switchTool = (next: ToolMode) => {
+    // לחיצה על סוג קיר כשיש קיר נבחר במצב בחירה — המר את הקיר במקום לפתוח כלי ציור
+    if (isSelectTool && selectedWallIds.size === 1 && (Object.keys(WALL_STYLES) as string[]).includes(next as string)) {
+      updateWall(Array.from(selectedWallIds)[0], { type: next as WallType });
+      return;
+    }
     if (drafting) finishDraft();
     setShapeStart(null);
     setSplitMode(false);

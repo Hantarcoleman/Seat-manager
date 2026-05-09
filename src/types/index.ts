@@ -224,4 +224,5 @@ export interface GenerateArrangementOptions {
   previousArrangement?: SeatingArrangement;
   seed?: number;
   separateGenders?: boolean;  // נסה להפריד בנים/בנות בשולחנות זוגיים
+  forbiddenGroups?: string[][];  // קבוצות תלמידים שאסור להושיב יחד
 }

@@ -7,6 +7,8 @@ const uid = () => Math.random().toString(36).slice(2, 10);
 interface StudentsState {
   // map by classroomId → תלמידים בכיתה זו
   byClassroom: Record<string, Student[]>;
+  // קבוצות שילוב אסורות לפי classroomId
+  forbiddenGroups: Record<string, string[][]>;
 
   hydrateStudents: (byClassroom: Record<string, Student[]>) => void;
   add: (classroomId: string, student: Omit<Student, 'id'>) => string;
@@ -15,12 +17,15 @@ interface StudentsState {
   importMany: (classroomId: string, students: Omit<Student, 'id'>[]) => void;
   clear: (classroomId: string) => void;
   get: (classroomId: string) => Student[];
+  addForbiddenGroup: (classroomId: string, studentIds: string[]) => void;
+  removeForbiddenGroup: (classroomId: string, idx: number) => void;
 }
 
 export const useStudentsStore = create<StudentsState>()(
   persist(
     (set, getState) => ({
       byClassroom: {},
+      forbiddenGroups: {},
 
       hydrateStudents: (incoming) =>
         set((s) => ({ byClassroom: { ...incoming, ...s.byClassroom } })),
@@ -69,6 +74,18 @@ export const useStudentsStore = create<StudentsState>()(
         }),
 
       get: (classroomId) => getState().byClassroom[classroomId] ?? [],
+
+      addForbiddenGroup: (classroomId, studentIds) =>
+        set((s) => {
+          const cur = s.forbiddenGroups[classroomId] ?? [];
+          return { forbiddenGroups: { ...s.forbiddenGroups, [classroomId]: [...cur, studentIds] } };
+        }),
+
+      removeForbiddenGroup: (classroomId, idx) =>
+        set((s) => {
+          const cur = s.forbiddenGroups[classroomId] ?? [];
+          return { forbiddenGroups: { ...s.forbiddenGroups, [classroomId]: cur.filter((_, i) => i !== idx) } };
+        }),
     }),
     { name: 'seating_students_v1' }
   )

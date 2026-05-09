@@ -54,7 +54,7 @@ export function generateSeatingArrangement(
   for (let i = 0; i < numCandidates; i++) {
     const rng = makeRng(baseSeed + i * 7919);
     const candidate = buildCandidate(enrichedClassroom, students, rng, options);
-    const warnings = validateAssignments(candidate, enrichedClassroom, students, { separateGenders: options.separateGenders });
+    const warnings = validateAssignments(candidate, enrichedClassroom, students, { separateGenders: options.separateGenders, forbiddenGroups: options.forbiddenGroups });
     const score = scoreArrangement(warnings);
 
     if (score > bestScore) {
