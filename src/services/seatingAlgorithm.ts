@@ -249,6 +249,18 @@ function buildCandidate(
     // מחפש מושב שמכבד avoidNear
     let chosen: Seat | undefined;
 
+    // עזר: בדיקת שכנות שולחנות לצורך שילובים אסורים
+    const deskById = new Map(classroom.desks.map((d) => [d.id, d]));
+    const areNeighborDesks = (dA: string, dB: string) => {
+      if (dA === dB) return true;
+      const a = deskById.get(dA);
+      const b = deskById.get(dB);
+      if (!a || !b) return false;
+      const dx = a.position.x - b.position.x;
+      const dy = a.position.y - b.position.y;
+      return dx * dx + dy * dy < 240 * 240;
+    };
+
     for (const seat of freeSeats) {
       const occupants = deskOccupants.get(seat.deskId) ?? [];
       const conflict = occupants.some(
@@ -256,6 +268,19 @@ function buildCandidate(
           stu.avoidNear.includes(oid) ||
           (students.find((s) => s.id === oid)?.avoidNear.includes(stu.id) ?? false)
       );
+
+      // שילובים אסורים — לא באותו שולחן ולא בשולחן שכן
+      const forbiddenConflict = options.forbiddenGroups?.some((group) => {
+        const gs = new Set(group);
+        if (!gs.has(stu.id)) return false;
+        // בדוק את כל השולחנות השכנים
+        for (const [deskId, occs] of deskOccupants) {
+          if (!areNeighborDesks(seat.deskId, deskId)) continue;
+          if (occs.some((oid) => gs.has(oid))) return true;
+        }
+        return false;
+      }) ?? false;
+
       // distractible: מעדיף לא ליד חלון/דלת
       const distractConflict =
         stu.tags.includes('distractible') &&
@@ -280,8 +305,8 @@ function buildCandidate(
         return false;
       })();
 
-      if (!conflict && !distractConflict && !genderConflict) { chosen = seat; break; }
-      if (!conflict && !distractConflict && !chosen) chosen = seat; // fallback: ללא conflict, אבל עם הסחה
+      if (!conflict && !forbiddenConflict && !distractConflict && !genderConflict) { chosen = seat; break; }
+      if (!conflict && !forbiddenConflict && !distractConflict && !chosen) chosen = seat;
     }
     if (!chosen) chosen = freeSeats[0]; // worst-case
 

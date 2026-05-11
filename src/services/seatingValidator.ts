@@ -124,14 +124,14 @@ export function validateAssignments(
       });
     }
 
-    // שילובים אסורים — קבוצות שהמורה הגדיר
+    // שילובים אסורים — באותו שולחן
     if (opts?.forbiddenGroups) {
       for (const group of opts.forbiddenGroups) {
         const gs = new Set(group);
         if (gs.has(a.id) && gs.has(b.id)) {
           warnings.push({
             type: 'hard',
-            message: `🚫 ${a.name} ו-${b.name} אינם יכולים לשבת יחד (שילוב אסור)`,
+            message: `🚫 ${a.name} ו-${b.name} יושבים באותו שולחן (שילוב אסור)`,
             studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
           });
         }
@@ -175,6 +175,52 @@ export function validateAssignments(
         message: `⚡ ${a.name} ו-${b.name} יושבים יחד (שני ${a.gender === 'm' ? 'בנים' : 'בנות'})`,
         studentIds: [a.id, b.id], seatIds: [seats[0].id, seats[1].id],
       });
+    }
+  }
+
+  // ── שילובים אסורים — שולחנות שכנים ────────────────────────
+  // חייב לפחות שולחן אחד מפריד; לא מספיק להיות בשולחנות שונים אם הם צמודים
+  if (opts?.forbiddenGroups) {
+    const studentToDeskId = new Map<string, string>();
+    for (const a of arr.assignments) {
+      const seat = classroom.seats.find((s) => s.id === a.seatId);
+      if (seat) studentToDeskId.set(a.studentId, seat.deskId);
+    }
+    const deskById = new Map(classroom.desks.map((d) => [d.id, d]));
+
+    // שני שולחנות נחשבים שכנים אם מרחק מרכזיהם < 240px
+    // (שולחן זוגי רוחב 176px + גאפ אופייני ≈ 200px בין מרכזים)
+    const areNeighbors = (dA: string, dB: string): boolean => {
+      if (dA === dB) return false;
+      const a = deskById.get(dA);
+      const b = deskById.get(dB);
+      if (!a || !b) return false;
+      const dx = a.position.x - b.position.x;
+      const dy = a.position.y - b.position.y;
+      return dx * dx + dy * dy < 240 * 240;
+    };
+
+    for (const group of opts.forbiddenGroups) {
+      const placed = group.filter((id) => studentToDeskId.has(id));
+      for (let i = 0; i < placed.length; i++) {
+        for (let j = i + 1; j < placed.length; j++) {
+          const dA = studentToDeskId.get(placed[i])!;
+          const dB = studentToDeskId.get(placed[j])!;
+          if (dA === dB) continue; // נלכד כבר בבדיקת "באותו שולחן"
+          if (!areNeighbors(dA, dB)) continue;
+          const stuA = students.find((s) => s.id === placed[i]);
+          const stuB = students.find((s) => s.id === placed[j]);
+          if (!stuA || !stuB) continue;
+          const seatA = arr.assignments.find((a) => a.studentId === placed[i])?.seatId ?? '';
+          const seatB = arr.assignments.find((a) => a.studentId === placed[j])?.seatId ?? '';
+          warnings.push({
+            type: 'hard',
+            message: `🚫 ${stuA.name} ו-${stuB.name} יושבים בשולחנות צמודים (שילוב אסור) — נדרש שולחן מפריד`,
+            studentIds: [stuA.id, stuB.id],
+            seatIds: [seatA, seatB].filter(Boolean),
+          });
+        }
+      }
     }
   }
 
